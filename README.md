@@ -12,7 +12,7 @@ The way it works is as follows.
 On load-balancing nodes:
 
 1. Inhibit Docker Swarm's SNAT rule
-2. Add a firewall rule that sets the TOS byte within outgoing IP packets, destined for a service container in the ingress network, to the node's NODE_ID. The NODE_ID is determined by the final byte of the node's IP within the ingress network.
+2. Add a firewall rule that sets the TOS byte within outgoing IP packets, destined for a service container in the ingress network, to the node's `NODE_ID`. The `NODE_ID` is determined by the final byte of the node's IP within the ingress network.
 
 On service container nodes:
 
@@ -22,7 +22,15 @@ On service container nodes:
 4. Create a custom routing table for each load-balancing node/TOS value/connection mark value/firewall mark value.
 5. Select which custom routing table to use, according to the firewall mark on the outgoing packet.
 
-The daemon must be run on both load-balancer nodes and nodes running service containers, but its configuration must be tailored in advance with the NODE_IDs of all expected load-balancer nodes.
+The daemon must be run on both load-balancer nodes and nodes running service containers, but its configuration must be tailored in advance with the `NODE_ID` of all expected load-balancer nodes.
+
+N.B. Following production testing, for performance reasons the daemon also performs the following configuration within the ingress network namespace:
+
+1. Sets `net.ipv4.vs.conn_reuse_mode=0`, `net.ipv4.vs.expire_nodest_conn=1` and `net.ipv4.vs.expire_quiescent_template=1`
+2. Sets any further (or different) sysctl settings as specified on the node filesystem in `/etc/sysctl.d/conntrack.conf` and in `/etc/sysctl.d/ipvs.conf`
+3. Disables connection tracking within the ingress network namespace.
+
+**(If you do not want these changes made on your hosts, comment out these lines before running the script).**
 
 ## Usage
 
