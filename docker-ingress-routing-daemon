@@ -1,0 +1,194 @@
+#!/bin/bash
+
+VERSION=2.5
+
+# Ingress Routing Daemon v2.5
+# Copyright © 2020 Struan Bartlett
+# ----------------------------------------------------------------------
+# Permission is hereby granted, free of charge, to any person 
+# obtaining a copy of this software and associated documentation files 
+# (the "Software"), to deal in the Software without restriction, 
+# including without limitation the rights to use, copy, modify, merge, 
+# publish, distribute, sublicense, and/or sell copies of the Software, 
+# and to permit persons to whom the Software is furnished to do so, 
+# subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be 
+# included in all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, 
+# EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF 
+# MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND 
+# NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS 
+# BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN 
+# ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN 
+# CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE 
+# SOFTWARE.
+# ----------------------------------------------------------------------
+# Workaround for https://github.com/moby/moby/issues/25526
+
+log() {
+  [ -z "$_BASHPID" ] && _BASHPID="$BASHPID"
+  local D=$(date +%Y-%m-%d.%H:%M:%S.%N)
+  local S=$(printf "%s|%s|%05d|" "${D:0:26}" "$HOSTNAME" "$_BASHPID")
+  echo "$@" | sed "s/^/$S /g"
+}			
+
+SCRIPT_PATH=$(dirname $(realpath $0))
+DOCKER=$(which docker)
+
+# Prevent "WARNING: Error loading config file: .dockercfg: $HOME is not defined" messages
+export HOME=$SCRIPT_PATH
+
+if [ "$1" = "--install" ]; then
+  INSTALL=1
+elif [ "$1" = "--uninstall" ]; then
+  INSTALL=0
+else
+  echo "Usage: $0 [--install|--uninstall]" >&2
+fi
+
+if ! [ -x "$DOCKER" ]; then
+  echo "Docker binary not found; exiting." >&2
+  exit -1
+fi
+
+log "Docker Ingress Routing Daemon $VERSION starting ..."
+
+log "Dumping key variables..."
+
+if [ "$INSTALL" = "1" ] && [ -z "$INGRESS_NODE_GATEWAY_IPS" ]; then
+  log "!!! ----------------------------------------------------------------------"
+  log "!!! WARNING: Using default INGRESS_NODE_GATEWAY_IPS"
+  log "!!! Please generate a list by noting the values shown"
+  log "!!! for INGRESS_DEFAULT_GATEWAY on each of your swarm nodes."
+  log "!!!"
+  log "!!! You only have to do this once, or whenever you add or remove nodes."
+  log "!!!"
+  log "!!! Then relaunch using:"
+  log "!!! INGRESS_NODE_GATEWAY_IPS=\"<Node Ingress IP List>\" $0 -x"
+  log "!!! ----------------------------------------------------------------------"
+fi
+
+read INGRESS_SUBNET INGRESS_DEFAULT_GATEWAY \
+  < <(docker inspect ingress --format '{{(index .IPAM.Config 0).Subnet}} {{index (split (index .Containers "ingress-sbox").IPv4Address "/") 0}}')
+
+if [ -z "$INGRESS_SUBNET" ] || [ -z "$INGRESS_DEFAULT_GATEWAY" ]; then
+  log "Couldn't identify INGRESS_SUBNET or INGRESS_DEFAULT_GATEWAY; sleeping 1s, then exiting."
+  sleep 1
+  exit -1
+fi
+
+log "  - INGRESS_SUBNET=$INGRESS_SUBNET"
+log "  - INGRESS_DEFAULT_GATEWAY=$INGRESS_DEFAULT_GATEWAY"
+
+# We need the final bytes of the IP addresses on the ingress network of every node
+# i.e. We need the final byte of $INGRESS_DEFAULT_GATEWAY for every node in the swarm
+# This shouldn't change except when nodes are added or removed from the swarm, so should be reasonably stable.
+# You should configure this yourself, but for now let's assume we have 8 nodes with IPs in the INGRESS_SUBNET numbered x.x.x.2 ... x.x.x.9
+if [ -z "$INGRESS_NODE_GATEWAY_IPS" ]; then
+  INGRESS_NET=$(echo $INGRESS_DEFAULT_GATEWAY | cut -d'.' -f1,2,3)
+  INGRESS_NODE_GATEWAY_IPS="$INGRESS_NET.2 $INGRESS_NET.3 $INGRESS_NET.4 $INGRESS_NET.5 $INGRESS_NET.6 $INGRESS_NET.7 $INGRESS_NET.8 $INGRESS_NET.9"
+fi
+
+log "  - INGRESS_NODE_GATEWAY_IPS=\"$INGRESS_NODE_GATEWAY_IPS\""
+
+# Create node ID from INGRESS_DEFAULT_GATEWAY final byte
+NODE_ID=$(echo $INGRESS_DEFAULT_GATEWAY | cut -d'.' -f4)
+log "  - NODE_ID=$NODE_ID"
+
+if [ -z "$INSTALL" ]; then
+  echo
+  log "Docker Ingress Routing Daemon exiting."
+  exit 0
+fi
+
+# Delete any preexisting rules, before adding new ones.
+while nsenter --net=/var/run/docker/netns/ingress_sbox iptables -t nat -D POSTROUTING -d 10.0.0.0/24 -m ipvs --ipvs -j ACCEPT; do true; done 2>/dev/null
+while nsenter --net=/var/run/docker/netns/ingress_sbox iptables -t mangle -D POSTROUTING -d $INGRESS_SUBNET -j TOS --set-tos $NODE_ID/0xff; do true; done 2>/dev/null
+while nsenter --net=/var/run/docker/netns/ingress_sbox iptables -t raw -D PREROUTING -p tcp -j CT --notrack; do true; done 2>/dev/null
+
+if [ "$INSTALL" = "0" ]; then
+  echo
+  log "Docker Ingress Routing Daemon iptables rules uninstalled, exiting."
+  exit 0
+fi
+
+###############
+# $INSTALL is 1
+#
+
+# Add a rule ahead of the ingress network SNAT rule, that will cause the SNAT rule to be skipped.
+log "Adding ingress_sbox iptables nat rule: iptables -t nat -I POSTROUTING -d $INGRESS_SUBNET -m ipvs --ipvs -j ACCEPT"
+nsenter --net=/var/run/docker/netns/ingress_sbox iptables -t nat -I POSTROUTING -d $INGRESS_SUBNET -m ipvs --ipvs -j ACCEPT
+
+# 1. Set TOS to NODE_ID in all outgoing packets to INGRESS_SUBNET
+log "Adding ingress_sbox iptables mangle rule: iptables -t mangle -A POSTROUTING -d $INGRESS_SUBNET -j TOS --set-tos $NODE_ID/0xff"
+nsenter --net=/var/run/docker/netns/ingress_sbox iptables -t mangle -A POSTROUTING -d $INGRESS_SUBNET -j TOS --set-tos $NODE_ID/0xff
+
+log "Disabling ingress_sbox connection tracking"
+nsenter --net=/var/run/docker/netns/ingress_sbox iptables -t raw -I PREROUTING -p tcp -j CT --notrack
+
+# Set sysctl variables
+log "Setting ingress_sbox namespace sysctl variables net.ipv4.vs.conn_reuse_mode=0 net.ipv4.vs.expire_nodest_conn=1 net.ipv4.vs.expire_quiescent_template=1"
+nsenter --net=/var/run/docker/netns/ingress_sbox sysctl net.ipv4.vs.conn_reuse_mode=0 net.ipv4.vs.expire_nodest_conn=1 net.ipv4.vs.expire_quiescent_template=1
+log "Setting ingress_sbox namespace sysctl conntrack variables from /etc/sysctl.d/conntrack.conf"
+nsenter --net=/var/run/docker/netns/ingress_sbox sysctl --load=/etc/sysctl.d/conntrack.conf
+log "Setting ingress_sbox namespace sysctl ipvs variables from /etc/sysctl.d/ipvs.conf"
+nsenter --net=/var/run/docker/netns/ingress_sbox sysctl --load=/etc/sysctl.d/ipvs.conf
+
+log "Docker Ingress Routing Daemon launching docker event watcher in pgroup $$ ..."
+
+# Turn off job control
+set +m
+
+# Set lastpipe, so that the 'while read' runs in the main shell process,
+# making the script more resilient to subprocess exit.
+shopt -s lastpipe
+
+quit() {
+  trap '' EXIT TERM
+  log "Docker Ingress Routing Daemon received signal, propagating it to pgroup $$ ..."
+  kill -TERM -$$
+  log "Docker Ingress Routing Daemon exiting."
+  exit 0
+}
+
+trap quit EXIT TERM
+
+# Watch for container start events, and configure policy routing rules on each container
+# to ensure return path traffic for incoming connections is routed back via the correct interface
+# and to the correct node from which the incoming connection was received.
+docker events \
+  --format '{{.ID}} {{index .Actor.Attributes "com.docker.swarm.service.name"}}' \
+  --filter 'event=start' \
+  --filter 'type=container' | \
+  while read ID SERVICE
+  do
+    if [ -n "$SERVICE" ]; then
+    
+      NID=$(docker inspect -f '{{.State.Pid}}' $ID)
+      log "Container ID=$ID, NID=$NID, SERVICE=$SERVICE started: applying policy routes."
+      
+      # 3. Map any connection mark on outgoing traffic to a firewall mark on the individual packets.
+      nsenter -n -t $NID iptables -t mangle -A OUTPUT -p tcp -j CONNMARK --restore-mark
+
+      for NODE_IP in $INGRESS_NODE_GATEWAY_IPS
+      do
+        NODE_ID=$(echo $NODE_IP | cut -d'.' -f4)
+	
+	# 2. Map the TOS value on any incoming packets to a connection mark, using the same value.
+        nsenter -n -t $NID iptables -t mangle -A PREROUTING -m tos --tos $NODE_ID/0xff -j CONNMARK --set-xmark $NODE_ID/0xffffffff
+	
+	# 4. Select the correct routing table to use, according to the firewall mark on the outgoing packet.
+        nsenter -n -t $NID ip rule add from $INGRESS_SUBNET fwmark $NODE_ID lookup $NODE_ID prio 32700
+	
+	# 5. Route outgoing traffic to the correct node's ingress network IP, according to its firewall mark
+	#    (which in turn came from its connection mark, its TOS value, and ultimately its IP).
+        nsenter -n -t $NID ip route add table $NODE_ID default via $NODE_IP dev eth0
+	
+      done
+
+    fi
+  done
+
