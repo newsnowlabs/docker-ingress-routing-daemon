@@ -1,9 +1,9 @@
 #!/bin/bash
 
-VERSION=2.5
+VERSION=2.5.1
 
-# Ingress Routing Daemon v2.5
-# Copyright © 2020 Struan Bartlett
+# Ingress Routing Daemon v2.5.1
+# Copyright © 2020-2021 Struan Bartlett
 # ----------------------------------------------------------------------
 # Permission is hereby granted, free of charge, to any person 
 # obtaining a copy of this software and associated documentation files 
@@ -104,7 +104,7 @@ if [ -z "$INSTALL" ]; then
 fi
 
 # Delete any preexisting rules, before adding new ones.
-while nsenter --net=/var/run/docker/netns/ingress_sbox iptables -t nat -D POSTROUTING -d 10.0.0.0/24 -m ipvs --ipvs -j ACCEPT; do true; done 2>/dev/null
+while nsenter --net=/var/run/docker/netns/ingress_sbox iptables -t nat -D POSTROUTING -d $INGRESS_SUBNET -m ipvs --ipvs -j ACCEPT; do true; done 2>/dev/null
 while nsenter --net=/var/run/docker/netns/ingress_sbox iptables -t mangle -D POSTROUTING -d $INGRESS_SUBNET -j TOS --set-tos $NODE_ID/0xff; do true; done 2>/dev/null
 while nsenter --net=/var/run/docker/netns/ingress_sbox iptables -t raw -D PREROUTING -p tcp -j CT --notrack; do true; done 2>/dev/null
 
