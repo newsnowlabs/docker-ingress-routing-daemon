@@ -133,9 +133,9 @@ nsenter --net=/var/run/docker/netns/ingress_sbox iptables -t raw -I PREROUTING -
 log "Setting ingress_sbox namespace sysctl variables net.ipv4.vs.conn_reuse_mode=0 net.ipv4.vs.expire_nodest_conn=1 net.ipv4.vs.expire_quiescent_template=1"
 nsenter --net=/var/run/docker/netns/ingress_sbox sysctl net.ipv4.vs.conn_reuse_mode=0 net.ipv4.vs.expire_nodest_conn=1 net.ipv4.vs.expire_quiescent_template=1
 log "Setting ingress_sbox namespace sysctl conntrack variables from /etc/sysctl.d/conntrack.conf"
-nsenter --net=/var/run/docker/netns/ingress_sbox sysctl --load=/etc/sysctl.d/conntrack.conf
+[ -f "/etc/sysctl.d/conntrack.conf" ] && nsenter --net=/var/run/docker/netns/ingress_sbox sysctl --load=/etc/sysctl.d/conntrack.conf
 log "Setting ingress_sbox namespace sysctl ipvs variables from /etc/sysctl.d/ipvs.conf"
-nsenter --net=/var/run/docker/netns/ingress_sbox sysctl --load=/etc/sysctl.d/ipvs.conf
+[ -f "/etc/sysctl.d/ipvs.conf" ] && nsenter --net=/var/run/docker/netns/ingress_sbox sysctl --load=/etc/sysctl.d/ipvs.conf
 
 log "Docker Ingress Routing Daemon launching docker event watcher in pgroup $$ ..."
 
