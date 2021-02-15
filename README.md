@@ -9,20 +9,20 @@ The docker-ingress-routing-daemon works around this limitation, by inhibiting SN
 
 The way it works is as follows.
 
-On load-balancing nodes:
+For load-balancing nodes:
 
-1. Inhibit Docker Swarm's SNAT rule
+1. Inhibit Docker Swarm's SNAT rule (for all traffic, or for specified TCP and UDP traffic, depending on command line arguments)
 2. Add a firewall rule that sets the TOS byte within outgoing IP packets, destined for a service container in the ingress network, to the node's `NODE_ID`. The `NODE_ID` is determined by the final byte of the node's IP within the ingress network.
 
-On service container nodes:
+For service container nodes:
 
-1. Monitor for newly-launched service containers, and when a new container is seen, add firewall and routing rules within the container's namespace that implement the following.
+1. Monitor for newly-launched service containers, and when a new container is seen, if the ingress network is found, add firewall and routing rules within the container's namespace that implement the following.
 2. Map the TOS value on any incoming packets to a connection mark, using the same value.
 3. Map any connection mark on reverse path traffic to a firewall mark on the individual packets
 4. Create a custom routing table for each load-balancing node/TOS value/connection mark value/firewall mark value.
 5. Select which custom routing table to use, according to the firewall mark on the outgoing packet.
 
-The daemon must be run on both load-balancer nodes and nodes running service containers, but its configuration must be tailored in advance with the `NODE_ID` of all expected load-balancer nodes.
+The daemon must be run on both load-balancer nodes and nodes running service containers, but the ingress network IPs of all nodes intended to be used as load-balancers must be specified using `--ingress-gateway-ips` as a launch-time argument.
 
 N.B. Following production testing, for performance reasons the daemon also performs the following configuration within the ingress network namespace:
 
@@ -30,25 +30,35 @@ N.B. Following production testing, for performance reasons the daemon also perfo
 2. Sets any further (or different) sysctl settings as specified on the node filesystem in `/etc/sysctl.d/conntrack.conf` and in `/etc/sysctl.d/ipvs.conf`
 3. Disables connection tracking within the ingress network namespace.
 
-**(If you do not want these changes made on your hosts, comment out these lines before running the script).**
+**(If you do not want these changes made on your hosts, run the daemon with the `--no-performance` option).**
 
 ## Usage
 
 ### Setting up
 
-Generate a value for `INGRESS_NODE_GATEWAY_IPS` specific for the load-balancer nodes you intend to use in your swarm. You do this by running `docker-ingress-routing-daemon` as root on every one of your swarm's nodes **_that you'd like to use as a load-balancer endpoint_** (normally only your manager nodes, or a subset of your manager nodes), noting the values shown for `INGRESS_DEFAULT_GATEWAY`. You only have to do this once, or whenever you add or remove nodes. Your `INGRESS_NODE_GATEWAY_IPS` should look like `10.0.0.2 10.0.0.3 10.0.0.4 10.0.0.5` (according to the subnet defined for the ingress network, and the number of nodes).
+Generate a list of the ingress network IPs of the nodes you intend to use as load balancers in your swarm.  You do this by running `docker-ingress-routing-daemon` as root on every one of your swarm's nodes **_that you'd like to use as a load-balancer endpoint_**, noting the ingress network IP shown. You only have to do this once, or whenever you add or remove nodes. Your ingress network IPs should look something like `10.0.0.2 10.0.0.3 10.0.0.4 10.0.0.5` (according to the subnet defined for the ingress network, and the number of nodes; IPs will not necessarily be sequential).  
 
 ### Running the daemon
 
-Run `INGRESS_NODE_GATEWAY_IPS="<Node Ingress IP List>" docker-ingress-routing-daemon --install` as root on **_each and every one_** of your load-balancer and/or service container nodes **_before_** creating your service. (If your service is already created, then ensure you scale it to 0 before scaling it back to a positive number of replicas.) The daemon will initialise iptables, detect when docker creates new containers, and apply new routing rules to each new container.
+Run `docker-ingress-routing-daemon --ingress-gateway-ips <Node Ingress IP List> --install` as root on **_each and every one_** of your load-balancer and/or service container nodes **_before_** creating your service. (If your service is already created, then ensure you scale it to 0 before scaling it back to a positive number of replicas.) The daemon will initialise iptables, detect when docker creates new containers, and apply new routing rules to each new container.  
 
-If you need to restrict the daemon’s activities to a particular service, then modify `[ -n "$SERVICE" ]` to `[ "$SERVICE" = "myservice" ]`.
+If you need to restrict the daemon’s installation of routing and firewall rules within launched containers to containers for specific services, then add `--services <Service List>`.
+
+If you do not use `--services` then all service containers with an ingress network interface will be configured by the daemon.
+
+If you need to restrict the daemons activities to the specific TCP or UDP ports published by the above services, then add `--tcp-ports <ports>` or `--udp-ports <ports>`, or both. If you do not use these options then all IPVS traffic routed by the node will be routed to service containers instead of masqueraded.
+
+(For more detailed daemon usage, run `docker-ingress-routing-daemon --help`.)
 
 ### Uninstalling iptables rules
 
 Run `docker-ingress-routing-daemon --uninstall` on each node.
 
 ## Testing
+
+The docker-ingress-routing-daemon can be tested on a single-node or multi-node docker swarm.
+
+## Production testing
 
 The docker-ingress-routing-daemon is used in production on the website https://www.newsnow.co.uk/, currently handling in excess of 1,000 requests per second.
 
