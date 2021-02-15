@@ -48,7 +48,21 @@ If you do not use `--services` then all service containers with an ingress netwo
 
 If you need to restrict the daemons activities to the specific TCP or UDP ports published by the above services, then add `--tcp-ports <ports>` or `--udp-ports <ports>`, or both. If you do not use these options then all IPVS traffic routed by the node will be routed to service containers instead of masqueraded.
 
-(For more detailed daemon usage, run `docker-ingress-routing-daemon --help`.)
+For detailed daemon usage, run:
+
+```
+# ./docker-ingress-routing-daemon
+Usage: ./docker-ingress-routing-daemon [--install [OPTIONS] | --uninstall | --help]
+
+           --services <services>  - service names to disable masquerading for
+             --tcp-ports <ports>  - TCP ports to disable masquerading for
+             --udp-ports <ports>  - UDP ports to disable masquerading for
+     --ingress-gateway-ips <ips>  - specify load-balance ingress IPs
+                --no-performance  - disable performance optimisations
+
+    (services, ports and IPs may be comma or space-separated or may be specified
+     multiple times)
+```
 
 ### Uninstalling iptables rules
 
