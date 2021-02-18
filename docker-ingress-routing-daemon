@@ -1,8 +1,8 @@
 #!/bin/bash
 
-VERSION=3.0.0
+VERSION=3.0.1
 
-# Ingress Routing Daemon v3.0.0
+# Ingress Routing Daemon v3.0.1
 # Copyright © 2020-2021 Struan Bartlett
 # ----------------------------------------------------------------------
 # Permission is hereby granted, free of charge, to any person 
@@ -102,7 +102,7 @@ TCPServicePortString=$(echo ${TCP_PORTS[@]} | tr ' ' ',')
 UDPServicePortString=$(echo ${UDP_PORTS[@]} | tr ' ' ',')
 
 if [ ${#INGRESS_NODE_GATEWAY_IPS[@]} -gt 0 ]; then
-  INGRESS_NODE_GATEWAY_IPS=$(echo ${INGRESS_NODE_GATEWAY_IPS[@]} | tr ' ' ',')
+  INGRESS_NODE_GATEWAY_IPS=$(echo ${INGRESS_NODE_GATEWAY_IPS[@]})
 fi
 
 # Prevent "WARNING: Error loading config file: .dockercfg: $HOME is not defined" messages
