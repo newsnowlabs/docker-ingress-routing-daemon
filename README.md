@@ -21,6 +21,7 @@ For service container nodes:
 3. Map any connection mark on reverse path traffic to a firewall mark on the individual packets
 4. Create a custom routing table for each load-balancing node/TOS value/connection mark value/firewall mark value.
 5. Select which custom routing table to use, according to the firewall mark on the outgoing packet.
+6. Enable 'loose' reverse-path filter mode on the container ingress network interface.
 
 The daemon must be run on both load-balancer nodes and nodes running service containers, but the ingress network IPs of all nodes intended to be used as load-balancers must be specified using `--ingress-gateway-ips` as a launch-time argument.
 
