@@ -1,9 +1,24 @@
 # docker-ingress-routing-daemon
-Docker swarm daemon that modifies ingress mesh routing to expose true client IPs to service containers
+
+Docker swarm daemon that modifies ingress mesh routing to expose true client IPs to service containers:
+- implemented _purely through routing and firewall rules_; and so
+- _without the need for running any additional application layers like traefik or other reverse proxies_; and so
+- _there's no need to reconfigure your existing application_.
+
+As far as we know, at the time of writing the docker-ingress-routing-daemon is _the most lightweight way to access client IPs_ from within containers launched by docker services.
+
+Summary of features:
+- Support for replacing docker's masquerading with routing on incoming traffic either for all published services, or only for specified services on specified TCP or UDP ports
+- Support for recent kernels (such as employed in Google Cloud images) that set `rp_filter=1` (strict) inside service containers (though this can be disabled)
+- Automatic installation of kernel tweaks that improve IPVS performance in production
+
+## Background
 
 Docker Swarm's out-of-the-box ingress mesh routing logic uses IPVS and SNAT to route incoming traffic to service containers. By using SNAT to set the source IP of each incoming connection to the ingress network IP of the node, service containers receiving traffic from multiple nodes can route the reverse path traffic back to the correct node, which is necessary for the SNAT to be reversed and the reverse path traffic returned to the correct client IP.
 
 An unfortunate side-effect of this approach is that to service containers, all incoming traffic appears to arrive from the same set of ingress network node IPs, and service containers cannot geolocate clients.
+
+## The solution
 
 The docker-ingress-routing-daemon works around this limitation, by inhibiting SNAT and instead using a combination of firewall and policy routing rules to route reverse path traffic back to the correct node.
 
