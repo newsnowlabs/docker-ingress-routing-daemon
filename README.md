@@ -14,13 +14,17 @@ Summary of features:
 
 ## Background
 
-Docker Swarm's out-of-the-box ingress mesh routing logic uses IPVS and SNAT to route incoming traffic to service containers. By using SNAT to set the source IP of each incoming connection to the ingress network IP of the node, service containers receiving traffic from multiple nodes can route the reverse path traffic back to the correct node, which is necessary for the SNAT to be reversed and the reverse path traffic returned to the correct client IP.
+Docker Swarm's out-of-the-box ingress mesh routing logic uses IPVS and SNAT to route incoming traffic to service containers. By using SNAT to masquerade the source IP of each incoming connection to be the ingress network IP of the load balancer node, service containers receiving traffic from multiple load balancer nodes are able to route the reverse path traffic back to the correct node (which is necessary for the SNAT to be reversed and the reverse path traffic returned to the correct client IP).
 
-An unfortunate side-effect of this approach is that to service containers, all incoming traffic appears to arrive from the same set of ingress network node IPs, and service containers cannot geolocate clients.
+An unfortunate side-effect of this approach is that to service containers, all incoming traffic appears to arrive from the same set of private network ingress network node IPs, meaning service containers cannot distinguish individual clients by IP, or geolocate clients.
+
+This has been documented in moby/moby issue [#25526](https://github.com/moby/moby/issues/25526) (as well as [#15086](https://github.com/moby/moby/issues/15086), [#26625](https://github.com/moby/moby/issues/26625) and [#27143](https://github.com/moby/moby/issues/27143)).
+
+Typical existing workarounds require running an independent reverse-proxy load-balancer, like nginx or traefik, in front of your docker services, and modifying your applications to examine the `X-Forwarded-For` header. Compared to docker's own load balancer, which uses the kernel's IPVS, this is likely to be less efficient.
 
 ## The solution
 
-The docker-ingress-routing-daemon works around this limitation, by inhibiting SNAT and instead using a combination of firewall and policy routing rules to route reverse path traffic back to the correct node.
+The docker-ingress-routing-daemon works around this limitation, by inhibiting SNAT masquerading, and instead deploying a combination of firewall and policy routing rules to allow service containers to route reverse-path traffic back to the correct load-balancing node.
 
 The way it works is as follows.
 
@@ -28,6 +32,7 @@ For load-balancing nodes:
 
 1. Inhibit Docker Swarm's SNAT rule (for all traffic, or for specified TCP and UDP traffic, depending on command line arguments)
 2. Add a firewall rule that sets the TOS byte within outgoing IP packets, destined for a service container in the ingress network, to the node's `NODE_ID`. The `NODE_ID` is determined by the final byte of the node's IP within the ingress network.
+3. Installation kernel sysctl tweaks that improve IPVS performance in production (unless disabled)
 
 For service container nodes:
 
