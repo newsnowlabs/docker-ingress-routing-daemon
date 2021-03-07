@@ -101,14 +101,21 @@ We run the daemon on all 10 nodes of our swarm, of which currently only two serv
 
 Using the daemon, we have been able to avoid significant changes to our tech stack, which used to run native IPVS load-balancing, or to our application's internals (which relied upon identifying the requesting client's IP address for geolocation and security purposes).
 
+## Adding new load-balancer nodes or bringing existing nodes into service as load-balancers
+
+If you add load-balancer nodes to your swarm - or want to start using existing nodes as load-balancer nodes - you will need to tread carefully as existing containers will not be able to route traffic back to the new endpoint nodes. We recommend the following procedure:
+1. Restart the `docker-ingress-routing-daemon` _across your cluster_ with the updated IP list for `--ingress-gateway-ips`
+2. Perform a rolling update of _all service containers_, so that they will have updated policy routing rules installed referencing the new nodes ingress gateway IPs
+3. Bring your new load-balancer nodes into service, allowing public internet traffic to reach them.
+
 ## Limitations
 
-As the TOS value can store an 8-bit number, this model can in principle support up to 256 load-balancer endpoint nodes.
+As the IP TOS byte can store an 8-bit number, this model can in principle support up to 256 load-balancer nodes.
 
-However as the model requires every container be installed with one iptables mangle rule + one policy routing rule + one policy routing table per manager endpoint node, there might possibly be some performance degradation as the number of such endpoint nodes increases (although experience suggests this is unlikely to be noticeable with <= 16 load-balancer endpoint nodes on modern hardware).
+As, currently, the unique `NODE_ID` is determined from the load-balancer node's ingress network IP, the ingress network cannot be larger than a `/24`.
 
-If you add load-balancer nodes to your swarm - or want to start using existing nodes as load-balancer nodes - you will need to tread carefully as existing containers will not be able to route traffic back to the new endpoint nodes. Try restarting `INGRESS_NODE_GATEWAY_IPS="<Node Ingress IP List>" docker-ingress-routing-daemon` with the updated value for `INGRESS_NODE_GATEWAY_IPS` across the cluster first, then perform a rolling update of all containers, before using the new load-balancer node.
+As the implementation requires every container be installed with one policy routing rule and routing table per load-balancer node, there might possibly be some performance degradation as the number of such load-balancer nodes increases (although experience suggests this is unlikely to be noticeable with <= 16 load-balancer endpoint nodes on modern hardware).
 
 ## Scope for native Docker integration
 
-I’m not familiar with the Docker codebase, but I can’t see anything that `docker-ingress-routing-daemon-v2` does that couldn’t, in principle, be implemented by Docker natively, but I'll leave that for the Docker team to consider, or as an exercise for someone familiar with the Docker code.
+I’m not familiar with the Docker codebase, but I can’t see anything that `docker-ingress-routing-daemon` does that couldn’t, in principle, be implemented by Docker natively, but I'll leave that for the Docker team to consider, or as an exercise for someone familiar with the Docker code.
