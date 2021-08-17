@@ -46,7 +46,7 @@ detect_ingress() {
   read INGRESS_SUBNET INGRESS_DEFAULT_GATEWAY \
     < <(docker inspect ingress --format '{{(index .IPAM.Config 0).Subnet}} {{index (split (index .Containers "ingress-sbox").IPv4Address "/") 0}}')
     
-  [ -n"$INGRESS_SUBNET" ] && [ -n"$INGRESS_DEFAULT_GATEWAY" ] && return 0
+  [ -n"$INGRESS_SUBNET" ] && [ -n"$INGRESS_DEFAULT_GATEWAY" ] && [ ! -z "$INGRESS_DEFAULT_GATEWAY" ] && return 0
   
   return 1
 }
