@@ -248,13 +248,20 @@ shopt -s lastpipe
 
 trap quit EXIT TERM INT
 
+# Check running services and
 # Watch for container start events, and configure policy routing rules on each container
 # to ensure return path traffic for incoming connections is routed back via the correct interface
 # and to the correct node from which the incoming connection was received.
+(
+docker ps \
+  --format '{{.ID}} {{.Label "com.docker.swarm.service.name"}}' \
+  --filter 'status=running' \
+  --filter "label=com.docker.swarm.service.name"
 docker events \
   --format '{{.ID}} {{index .Actor.Attributes "com.docker.swarm.service.name"}}' \
   --filter 'event=start' \
-  --filter 'type=container' | \
+  --filter 'type=container'
+) | \
   while read ID SERVICE
   do
     if [ -z "$SERVICE" ]; then
