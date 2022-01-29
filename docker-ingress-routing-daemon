@@ -1,8 +1,8 @@
 #!/bin/bash
 
-VERSION=4.0.0
+VERSION=4.1.0
 
-# Ingress Routing Daemon v4.0.0
+# Ingress Routing Daemon v4.1.0
 # Copyright © 2020-2021 Struan Bartlett
 # ----------------------------------------------------------------------
 # Permission is hereby granted, free of charge, to any person 
@@ -51,18 +51,91 @@ detect_ingress() {
   return 1
 }
 
+route_ingress() {
+  local ID="$1"
+  local SERVICE="$2"
+
+  if [ -z "$SERVICE" ]; then
+    return
+  fi
+
+  if [ ${#SERVICES[@]} -gt 0 ] && ! [[ " ${SERVICES[@]} " =~ " $SERVICE " ]]; then
+    log "Detected container launch for service '$SERVICE', with ID '$ID': unmatched service, so skipping."
+    return
+  fi
+
+  local NID=$(docker inspect -f '{{.State.Pid}}' $ID)
+  local CIF=$(nsenter -n -t $NID ip -brief addr show to $INGRESS_SUBNET | cut -d'@' -f1)
+
+  if [ -z "$CIF" ]; then
+    log "Detected container launch for service '$SERVICE', with ID '$ID' and NID '$NID': no ingress network interface found, so skipping."
+    return
+  fi
+
+  local IPTABLE_COMMENT="docker-ingress-routing-daemon"
+  if nsenter -n -t $NID iptables -t mangle -C OUTPUT -m comment --comment "$IPTABLE_COMMENT" 2>/dev/null; then
+    log "Detected container for service '$SERVICE', with ID '$ID' and NID '$NID': mangle table already configured, so skipping."
+    return
+  fi
+    
+  log "Detected container launch for service '$SERVICE', with ID '$ID' and NID '$NID': ingress network interface $CIF found, so applying policy routing/firewall rules:"
+   
+  # 3. Map any connection mark on outgoing tcp or udp traffic to a firewall mark on the individual packets.
+  #    These rules /could potentially/ be applied more selectively, according to --tcp-ports and --udp-ports, to make
+  #    a marginal efficiency gain, but this is not necessary: as, if no connection mark has been set, because no
+  #    TOS byte has been set by the load balancer, then none will be restored and legacy routing rules will apply.
+  #    - See https://github.com/newsnowlabs/docker-ingress-routing-daemon/issues/11
+  log "- Adding container mangle table iptables rules"
+  nsenter -n -t $NID iptables -t mangle -A OUTPUT -m comment --comment "$IPTABLE_COMMENT"
+  nsenter -n -t $NID iptables -t mangle -A OUTPUT -p udp -j CONNMARK --restore-mark
+  nsenter -n -t $NID iptables -t mangle -A OUTPUT -p tcp -j CONNMARK --restore-mark
+
+  # 3.1 Enable 'loose' rp_filter mode on interface $CIF (and 'all' as required by kernel
+  #     see https://www.kernel.org/doc/Documentation/networking/ip-sysctl.txt)
+  log "- Setting container sysctl net.ipv4.conf.all.rp_filter=2 net.ipv4.conf.$CIF.rp_filter=2"
+  nsenter -n -t $NID sysctl -q net.ipv4.conf.all.rp_filter=2 net.ipv4.conf.$CIF.rp_filter=2
+
+  local INDEX=1 NODE_IP
+  for NODE_IP in ${INGRESS_NODE_GATEWAY_IPS[@]}
+  do
+    if [ "$NODE_IP" != "null" ]; then
+      if [ -n "$INDEXED_IDS" ]; then
+        NODE_ID=$INDEX
+      else
+        NODE_ID=$(echo $NODE_IP | cut -d'.' -f4)
+      fi
+
+      log "- Adding container policy routing/firewall rules for load-balancer #$NODE_ID with IP $NODE_IP"
+
+      # 2. Map the TOS value on any incoming packets to a connection mark, using the same value.
+      nsenter -n -t $NID iptables -t mangle -A PREROUTING -m tos --tos $NODE_ID/0xff -j CONNMARK --set-xmark $NODE_ID/0xffffffff
+
+      # 4. Select the correct routing table to use, according to the firewall mark on the outgoing packet.
+      nsenter -n -t $NID ip rule add from $INGRESS_SUBNET fwmark $NODE_ID lookup $NODE_ID prio 32700
+
+      # 5. Route outgoing traffic to the correct node's ingress network IP, according to its firewall mark
+      #    (which in turn came from its connection mark, its TOS value, and ultimately its IP).
+      nsenter -n -t $NID ip route add table $NODE_ID default via $NODE_IP
+    fi
+    ((INDEX+=1))
+  done
+  log "- Finished configuring launched container"
+}
+
 usage() {
   echo "Docker Ingress Routing Daemon v$VERSION" >&2
   echo >&2
   echo "Usage: $0 [--install [OPTIONS] | --uninstall | --help]" >&2
   echo >&2
-  echo "          --services <services> - service names to disable masquerading for" >&2
-  echo "          --tcp-ports <ports>   - TCP ports to disable masquerading for" >&2
-  echo "          --udp-ports <ports>   - UDP ports to disable masquerading for" >&2
-  echo "  --ingress-gateway-ips <ips>   - load-balancer ingress IPs" >&2
-  echo "             --no-performance   - disable performance optimisations" >&2
-  echo "                --indexed-ids   - use sequential ids for load balancers" >&2
-  echo "                                  (forced where ingress subnet larger than /24)" >&2
+  echo "         --services <services>   - service names to disable masquerading for" >&2
+  echo "           --tcp-ports <ports>   - TCP ports to disable masquerading for" >&2
+  echo "           --udp-ports <ports>   - UDP ports to disable masquerading for" >&2
+  echo "   --ingress-gateway-ips <ips>   - load-balancer ingress IPs" >&2
+  echo "              --no-performance   - disable performance optimisations" >&2
+  echo "                 --indexed-ids   - use sequential ids for load balancers" >&2
+  echo "                                   (forced where ingress subnet larger than /24)" >&2
+  echo "                 --preexisting   - optionally install rules where needed" >&2
+  echo "                                   on preexisting containers" >&2
   echo >&2
   echo "Notes:" >&2
   echo "- <services>, <ports> and <ips> may be comma-separated, space-separated," >&2
@@ -88,19 +161,20 @@ INGRESS_NODE_GATEWAY_IPS=($INGRESS_NODE_GATEWAY_IPS) # Convert legacy env var to
 while true
 do
   case "$1" in
-        --services) shift; SERVICES+=($(echo "$1" | tr ',' ' ')); shift; continue; ;;
-       --tcp-ports) shift; TCP_PORTS+=($(echo "$1" | tr ',' ' ')); shift; continue; ;;
-       --udp-ports) shift; UDP_PORTS+=($(echo "$1" | tr ',' ' ')); shift; continue; ;;
-         --install) shift; INSTALL=1; continue; ;;
-       --uninstall) shift; INSTALL=0; continue; ;;
-     --ingress-gateway-ips) shift; INGRESS_NODE_GATEWAY_IPS+=($(echo "$1" | tr ',' ' ')); shift; continue; ;;
-  --no-performance) shift; PERFORMANCE=0; continue; ;;
-     --indexed-ids) shift; INDEXED_IDS=1; continue; ;;
-   
-      -h|--help) usage; ;;
-             '') break; ;;
-	     
-              *) usage; break; ;;
+              --services) shift; SERVICES+=($(echo "$1" | tr ',' ' ')); shift; continue; ;;
+             --tcp-ports) shift; TCP_PORTS+=($(echo "$1" | tr ',' ' ')); shift; continue; ;;
+             --udp-ports) shift; UDP_PORTS+=($(echo "$1" | tr ',' ' ')); shift; continue; ;;
+               --install) shift; INSTALL=1; continue; ;;
+             --uninstall) shift; INSTALL=0; continue; ;;
+   --ingress-gateway-ips) shift; INGRESS_NODE_GATEWAY_IPS+=($(echo "$1" | tr ',' ' ')); shift; continue; ;;
+        --no-performance) shift; PERFORMANCE=0; continue; ;;
+           --indexed-ids) shift; INDEXED_IDS=1; continue; ;;
+           --preexisting) shift; PREEXISTING=1; continue; ;;
+
+               -h|--help) usage; ;;
+                      '') break; ;;
+
+                       *) usage; break; ;;
   esac
 done
 
@@ -285,8 +359,6 @@ if [ "$PERFORMANCE" != "0" ]; then
     nsenter --net=/var/run/docker/netns/ingress_sbox sysctl -q --load=/etc/sysctl.d/ipvs.conf
 fi
 
-log "Launching docker event watcher to monitor for container launches (pgroup $$) ..."
-
 # Turn off job control
 set +m
 
@@ -295,6 +367,20 @@ set +m
 shopt -s lastpipe
 
 trap quit EXIT TERM INT
+
+if [ "$PREEXISTING" = "1" ]; then
+  log "Checking for preexisting containers that need routing rules added ..."
+  docker ps \
+    --format '{{.ID}} {{.Label "com.docker.swarm.service.name"}}' \
+    --filter 'status=running' \
+    --filter "label=com.docker.swarm.service.name" | \
+    while read ID SERVICE
+    do
+      route_ingress "$ID" "$SERVICE"
+    done
+fi
+  
+log "Launching docker event watcher to monitor for container launches (pgroup $$) ..."
 
 # Watch for container start events, and configure policy routing rules on each container
 # to ensure return path traffic for incoming connections is routed back via the correct interface
@@ -305,67 +391,5 @@ docker events \
   --filter 'type=container' | \
   while read ID SERVICE
   do
-    if [ -z "$SERVICE" ]; then
-      continue
-    fi
-
-    if [ ${#SERVICES[@]} -gt 0 ] && ! [[ " ${SERVICES[@]} " =~ " $SERVICE " ]]; then
-      log "Detected container launch for service '$SERVICE', with ID '$ID': unmatched service, so skipping."
-      continue
-    fi
-
-    NID=$(docker inspect -f '{{.State.Pid}}' $ID)
-    CIF=$(nsenter -n -t $NID ip -brief addr show to $INGRESS_SUBNET | cut -d'@' -f1)
-
-    if [ -z "$CIF" ]; then
-      log "Detected container launch for service '$SERVICE', with ID '$ID' and NID '$NID': no ingress network interface found, so skipping."
-      continue
-    fi
-
-    log "Detected container launch for service '$SERVICE', with ID '$ID' and NID '$NID': ingress network interface $CIF found, so applying policy routing/firewall rules:"
-     
-    # 3. Map any connection mark on outgoing tcp or udp traffic to a firewall mark on the individual packets.
-    #    These rules /could potentially/ be applied more selectively, according to --tcp-ports and --udp-ports, to make
-    #    a marginal efficiency gain, but this is not necessary: as, if no connection mark has been set, because no
-    #    TOS byte has been set by the load balancer, then none will be restored and legacy routing rules will apply.
-    #    - See https://github.com/newsnowlabs/docker-ingress-routing-daemon/issues/11
-    log "- Adding container mangle table iptables rules"
-    nsenter -n -t $NID iptables -t mangle -A OUTPUT -p udp -j CONNMARK --restore-mark
-    nsenter -n -t $NID iptables -t mangle -A OUTPUT -p tcp -j CONNMARK --restore-mark
-
-    # 3.1 Enable 'loose' rp_filter mode on interface $CIF (and 'all' as required by kernel
-    #     see https://www.kernel.org/doc/Documentation/networking/ip-sysctl.txt)
-    log "- Setting container sysctl net.ipv4.conf.all.rp_filter=2 net.ipv4.conf.$CIF.rp_filter=2"
-    nsenter -n -t $NID sysctl -q net.ipv4.conf.all.rp_filter=2 net.ipv4.conf.$CIF.rp_filter=2
-
-    INDEX=1
-    for NODE_IP in ${INGRESS_NODE_GATEWAY_IPS[@]}
-    do
-    
-      if [ "$NODE_IP" != "null" ]; then
-
-        if [ -n "$INDEXED_IDS" ]; then
-	  NODE_ID=$INDEX
-	else
-	  NODE_ID=$(echo $NODE_IP | cut -d'.' -f4)
-	fi
-	
-        log "- Adding container policy routing/firewall rules for load-balancer #$NODE_ID with IP $NODE_IP"
-	
-        # 2. Map the TOS value on any incoming packets to a connection mark, using the same value.
-        nsenter -n -t $NID iptables -t mangle -A PREROUTING -m tos --tos $NODE_ID/0xff -j CONNMARK --set-xmark $NODE_ID/0xffffffff
-	
-        # 4. Select the correct routing table to use, according to the firewall mark on the outgoing packet.
-        nsenter -n -t $NID ip rule add from $INGRESS_SUBNET fwmark $NODE_ID lookup $NODE_ID prio 32700
-	
-        # 5. Route outgoing traffic to the correct node's ingress network IP, according to its firewall mark
-        #    (which in turn came from its connection mark, its TOS value, and ultimately its IP).
-        nsenter -n -t $NID ip route add table $NODE_ID default via $NODE_IP
-	
-      fi
-
-      ((INDEX+=1))
-    done
-  
-  log "- Finished configuring launched container"
+    route_ingress "$ID" "$SERVICE"
   done
