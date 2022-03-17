@@ -1,0 +1,11 @@
+[Unit]
+Description=Docker Ingress Routing Daemon
+After=sysinit.target dockerd.service
+StartLimitIntervalSec=0
+
+[Service]
+ExecStart=/usr/local/bin/docker-ingress-routing-daemon --ingress-gateway-ips 10.0.0.2 --install
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
