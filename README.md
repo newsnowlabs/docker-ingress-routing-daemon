@@ -80,6 +80,10 @@ Usage: ./docker-ingress-routing-daemon [--install [OPTIONS] | --uninstall | --he
              --udp-ports <ports>  - UDP ports to disable masquerading for
      --ingress-gateway-ips <ips>  - specify load-balance ingress IPs
                 --no-performance  - disable performance optimisations
+                   --indexed-ids  - use sequential ids for load balancers
+                                    (forced where ingress subnet larger than /24)
+                   --preexisting  - optionally install rules where needed
+                                    on preexisting containers
 
     (services, ports and IPs may be comma or space-separated or may be specified
      multiple times)
