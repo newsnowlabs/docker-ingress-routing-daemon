@@ -116,8 +116,6 @@ If you add load-balancer nodes to your swarm - or want to start using existing n
 
 As the IP TOS byte can store an 8-bit number, this model can in principle support up to 256 load-balancer nodes.
 
-As, currently, the unique `NODE_ID` is determined from the load-balancer node's ingress network IP, the ingress network cannot be larger than a `/24`.
-
 As the implementation requires every container be installed with one policy routing rule and routing table per load-balancer node, there might possibly be some performance degradation as the number of such load-balancer nodes increases (although experience suggests this is unlikely to be noticeable with <= 16 load-balancer endpoint nodes on modern hardware).
 
 ## Scope for native Docker integration
