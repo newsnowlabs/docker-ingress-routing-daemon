@@ -89,6 +89,10 @@ Usage: ./docker-ingress-routing-daemon [--install [OPTIONS] | --uninstall | --he
      multiple times)
 ```
 
+#### Installing using systemd
+
+To install via systemd, please see the example systemd unit at `etc/systemd/system/dind.service`, which should be copied to `/etc/systemd/system` or `/usr/local/lib/systemd/system` (according to your distribution), and modified to reflect your required arguments. As normal when installing a new systemd unit, run `systemctl daemon-reload`, then enable the unit by running `systemctl enable dind` and if needed start the unit by running `systemctl start dind`.
+
 ### Uninstalling iptables rules
 
 Run `docker-ingress-routing-daemon --uninstall` on each node.
