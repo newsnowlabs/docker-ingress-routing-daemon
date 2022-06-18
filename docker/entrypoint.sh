@@ -1,7 +1,6 @@
 #!/bin/bash
 
 CHILD_CTR="dind-child"
-CHILD_IMAGE="${CHILD_IMAGE:-newsnowlabs/dind:latest}"
 RUNNING=1
 
 log() {
@@ -52,18 +51,26 @@ shutdown() {
 
 trap shutdown TERM INT QUIT
 
-if [ "$1" = "--service" ]; then
+if [ "$1" = "--daemon" ]; then
   shift
-  
+  exec /opt/docker-ingress-routing-daemon "$@"
+else
+
   log "DIND service starting up"
+
+  if [ -z "$CHILD_IMAGE" ]; then
+    CHILD_IMAGE=$(docker container inspect -f '{{ .Config.Image }}' $(hostname))
+  fi
   
+  log "DIND service running on image: $CHILD_IMAGE"
+
   # Stop any pre-existing daemon container
   remove_child
   
   while [ $RUNNING -eq 1 ]; do
     # Launch afresh, putting 'docker run' into the background (but not detaching it - we want to log its STDOUT)
     log "DIND service launching child container $CHILD_CTR ..."
-    docker run --name="$CHILD_CTR" -a stdout -a stderr --rm --privileged --pid=host -v /var/run/docker:/var/run/docker -v /var/run/docker.sock:/var/run/docker.sock dind:test "$@" &
+    docker run --name="$CHILD_CTR" -a stdout -a stderr --rm --privileged --pid=host -v /var/run/docker:/var/run/docker -v /var/run/docker.sock:/var/run/docker.sock $CHILD_IMAGE --daemon "$@" &
 
     DOCKER_PID="$!"
     log "DIND service launched child container with PID $DOCKER_PID"
@@ -79,6 +86,15 @@ if [ "$1" = "--service" ]; then
   done
   
   log "DIND service shutting down"
-else
-  exec /opt/docker-ingress-routing-daemon "$@"
 fi
+
+# Upgrade
+#
+# Add background process that logs this node's name, and ingress IP, every few seconds.
+#
+# Add outer-wrapper service, replica 1, contrained to run on manager nodes, that:
+# - runs 'docker service logs --since=10s' to gather node names and ingress IPs
+# - looks up labels for nodes, and eliminates nodes not labelled as LoadBalancer:1
+# - if the node list has changed (or first loop), shut down inner wrapper service
+# - launch inner wrapper service with list of ingress IPs
+# - sleep 15s

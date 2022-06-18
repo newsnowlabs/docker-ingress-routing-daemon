@@ -6,4 +6,4 @@ else
   OPTS=("$@")
 fi
 
-docker service create --name=dind --mode=global --mount=type=bind,src=/var/run/docker.sock,dst=/var/run/docker.sock newsnowlabs/dind:latest --service "${OPTS[@]}"
+docker service create --name=dind --mode=global --mount=type=bind,src=/var/run/docker.sock,dst=/var/run/docker.sock newsnowlabs/dind:latest "${OPTS[@]}"
