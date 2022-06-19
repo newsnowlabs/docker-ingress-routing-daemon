@@ -157,6 +157,7 @@ usage() {
 SCRIPT_PATH=$(dirname $(realpath $0))
 DOCKER=$(which docker)
 INGRESS_NODE_GATEWAY_IPS=($INGRESS_NODE_GATEWAY_IPS) # Convert legacy env var to new array
+ARGS=("$@")
 
 while true
 do
@@ -193,7 +194,7 @@ if ! [ -x "$DOCKER" ]; then
   exit -1
 fi
 
-log "Docker Ingress Routing Daemon $VERSION starting ..."
+log "Docker Ingress Routing Daemon $VERSION starting, with args: ${ARGS[@]}"
 
 if detect_ingress; then
   log "Detecting ingress network and node IP:"
