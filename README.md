@@ -130,9 +130,17 @@ Usage: ./docker-ingress-routing-daemon [--install [OPTIONS] | --uninstall | --he
      multiple times)
 ```
 
-### Uninstalling iptables rules
+## Uninstalling iptables rules
 
-Run `docker-ingress-routing-daemon --uninstall` on each node.
+If deployed using Docker:
+1. Tear down any manager container/service or global service you have launched (using either `docker rm dind` or `docker service rm dind` or `docker service rm dind-global`)
+2. Launch a temporary global service using `./docker/create-service.sh --global-service --uninstall`
+   - Or, using: `docker service create --name=dind-global --mode=global --env="DOCKER_NODE_HOSTNAME={{.Node.Hostname}}" --mount=type=bind,src=/var/run/docker.sock,dst=/var/run/docker.sock newsnowlabs/dind:latest --global-service --uninstall`
+3. Allow time for the temporary service to relaunch DIND with the `--uninstall` option (run `docker service logs -f dind-global` to monitor progress)
+4. Finally, tear down the temporary service using `docker service rm dind-global`
+
+If deployed manually:
+- Run `docker-ingress-routing-daemon --uninstall` on each node.
 
 ## Testing
 
