@@ -24,7 +24,7 @@ Typical existing workarounds require running an independent reverse-proxy load-b
 
 ## The solution
 
-The docker-ingress-routing-daemon works around this limitation, by inhibiting SNAT masquerading, and instead deploying a combination of firewall and policy routing rules to allow service containers to route reverse-path traffic back to the correct load-balancing node.
+The docker-ingress-routing-daemon (DIND) works around this limitation, by inhibiting SNAT masquerading, and instead deploying a combination of firewall and policy routing rules to allow service containers to route reverse-path traffic back to the correct load-balancing node.
 
 The way it works is as follows.
 
@@ -53,15 +53,56 @@ N.B. Following production testing, for performance reasons the daemon also perfo
 
 **(If you do not want these changes made on your hosts, run the daemon with the `--no-performance` option).**
 
-## Usage
+## Automagic installation via Docker
+
+The simplest way to install DIND is now via Docker.
+
+A DIND via Docker installation consists of these components:
+
+1. _[Optional]_ A manager container or service that autodetects (changes to) load balancer nodes and (re)launches the global service accordingly
+2. The global service, running one container on each swarm node, responsible for reporting the node's ingress IP to the manager, and launching a privileged child container
+3. A privileged child container, launched by the global service container, that actually runs DIND on each node
+
+e.g.
+
+To launch a manager _service_, run `./docker/create-service.sh --manager-service` from within this git repo, or on any docker swarm manager node just run:
+
+```
+docker service create --name=dind --replicas=1 --constraint=node.role==manager --mount=type=bind,src=/var/run/docker.sock,dst=/var/run/docker.sock newsnowlabs/dind:latest --install --preexisting
+```
+
+To launch a manager _container_, run `./docker/create-service.sh --manager` from within this git repo, or on any docker swarm manager just run:
+
+```
+docker run --name=dind --mount=type=bind,src=/var/run/docker.sock,dst=/var/run/docker.sock newsnowlabs/dind:latest --install --preexisting
+```
+
+To launch a global service directly, run `./docker/create-service.sh --global-service` from within this git repo, or on any docker swarm manager just run:
+
+```
+docker service create --name=dind-global --mode=global --env="DOCKER_NODE_HOSTNAME={{.Node.Hostname}}" --mount=type=bind,src=/var/run/docker.sock,dst=/var/run/docker.sock newsnowlabs/dind:latest --global-service --install --preexisting
+```
+
+Please note:
+
+- Other command-line options to DIND may be added after `--install` on any of these command lines, and `--preexisting` may be removed if not required (see below)
+- By default, the manager container/service will assume all nodes it detects are load balancers. However, if at least one node has the label `DIND-LB=1`, then only nodes having this label will be considered load balancers.
+
+## Manual installation
 
 ### Setting up
 
-Generate a list of the ingress network IPs of the nodes you intend to use as load balancers in your swarm.  You do this by running `docker-ingress-routing-daemon` as root on every one of your swarm's nodes **_that you'd like to use as a load-balancer endpoint_**, noting the ingress network IP shown. You only have to do this once, or whenever you add or remove nodes. Your ingress network IPs should look something like `10.0.0.2 10.0.0.3 10.0.0.4 10.0.0.5` (according to the subnet defined for the ingress network, and the number of nodes; IPs will not necessarily be sequential).  
+When installing manually, it's necessary to manually generate a list of the ingress network IPs of the nodes you intend to use as load balancers in your swarm. You do this by running `docker-ingress-routing-daemon` as root on every one of your swarm's nodes **_that you'd like to use as a load-balancer endpoint_**, noting the ingress network IP shown. You only have to do this once, or whenever you add or remove nodes. Your ingress network IPs should look something like `10.0.0.2 10.0.0.3 10.0.0.4 10.0.0.5` (according to the subnet defined for the ingress network, and the number of nodes; IPs will not necessarily be sequential).
 
 ### Running the daemon
 
-Run `docker-ingress-routing-daemon --ingress-gateway-ips <Node Ingress IP List> --install` as root on **_each and every one_** of your load-balancer and/or service container nodes **_before_** creating your service. (If your service is already created, then ensure you scale it to 0 before scaling it back to a positive number of replicas.) The daemon will initialise iptables, detect when docker creates new containers, and apply new routing rules to each new container.  
+Run `docker-ingress-routing-daemon --ingress-gateway-ips <Node Ingress IP List> --install` as root on **_each and every one_** of your load-balancer and/or service container nodes.
+
+It is recommended to do this **_before_** creating your services but if your services are already created you may either:
+- instruct DIND to operate on preexisting service containers by adding the command-line option `--preexisting`.
+- scale your preexisting non-global services to 0 before scaling them back to a positive number of replicas. The daemon will initialise iptables, detect when docker creates new containers, and apply new routing rules to each new container.
+
+## Command-line options
 
 If you need to restrict the daemon’s installation of routing and firewall rules within launched containers to containers for specific services, then add `--services <Service List>`.
 
