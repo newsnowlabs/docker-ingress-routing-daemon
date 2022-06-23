@@ -53,7 +53,7 @@ N.B. Following production testing, for performance reasons the daemon also perfo
 
 **(If you do not want these changes made on your hosts, run the daemon with the `--no-performance` option).**
 
-## Automagic installation via Docker
+## Automagic installation via Docker (Experimental)
 
 The simplest way to install DIND is now via Docker.
 
@@ -88,7 +88,7 @@ Please note:
 - Other command-line options to DIND may be added after `--install` on any of these command lines, and `--preexisting` may be removed if not required (see below)
 - By default, the manager container/service will assume all nodes it detects are load balancers. However, if at least one node has the label `DIND-LB=1`, then only nodes having this label will be considered load balancers.
 
-## Manual installation
+## Manual installation (Stable)
 
 ### Setting up
 
