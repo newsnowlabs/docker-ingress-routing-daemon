@@ -102,6 +102,10 @@ It is recommended to do this **_before_** creating your services but if your ser
 - instruct DIND to operate on preexisting service containers by adding the command-line option `--preexisting`.
 - scale your preexisting non-global services to 0 before scaling them back to a positive number of replicas. The daemon will initialise iptables, detect when docker creates new containers, and apply new routing rules to each new container.
 
+### Installing using systemd
+
+To install via systemd, please see the example systemd unit at `etc/systemd/system/dind.service`, which should be copied to `/etc/systemd/system` or `/usr/local/lib/systemd/system` (according to your distribution), and modified to reflect your required arguments. As normal when installing a new systemd unit, run `systemctl daemon-reload`, then enable the unit by running `systemctl enable dind` and if needed start the unit by running `systemctl start dind`.
+
 ## Command-line options
 
 If you need to restrict the daemon’s installation of routing and firewall rules within launched containers to containers for specific services, then add `--services <Service List>`.
