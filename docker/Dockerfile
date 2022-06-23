@@ -6,7 +6,8 @@ RUN apt-get update && \
     apt-get update && \
     DEBIAN_FRONTEND=noninteractive apt-get -y install docker-ce-cli gcc- && \
     apt-get remove g++ g++-8 && \
-    apt-get install -y procps iproute2 iptables
+    apt-get install -y procps iproute2 iptables && \
+    apt-get clean && rm -rf /var/lib/apt/lists/*
 
 ADD docker-ingress-routing-daemon docker/entrypoint.sh /opt/
 
