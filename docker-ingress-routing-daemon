@@ -1,9 +1,9 @@
 #!/bin/bash
 
-VERSION=4.1.2
+VERSION=4.2.0
 
-# Ingress Routing Daemon v4.1.2
-# Copyright © 2020-2021 Struan Bartlett
+# Ingress Routing Daemon v4.2.0
+# Copyright © 2020-2022 Struan Bartlett
 # ----------------------------------------------------------------------
 # Permission is hereby granted, free of charge, to any person 
 # obtaining a copy of this software and associated documentation files 
@@ -72,29 +72,29 @@ route_ingress() {
     return
   fi
 
+  log "Detected container launch for service '$SERVICE', with ID '$ID' and NID '$NID': ingress network interface '$CIF' found, so applying policy routing/firewall rules:"
+   
   local IPTABLE_COMMENT="docker-ingress-routing-daemon"
-  if nsenter -n -t $NID iptables -t mangle -C OUTPUT -m comment --comment "$IPTABLE_COMMENT" 2>/dev/null; then
-    log "Detected container for service '$SERVICE', with ID '$ID' and NID '$NID': mangle table already configured, so skipping."
-    return
+  if nsenter -n -t $NID iptables -t mangle -C OUTPUT -m comment --comment "$IPTABLE_COMMENT" >/dev/null 2>&1; then
+    log "- Skipping adding container mangle table iptables rules, which are already configured"
+  else
+
+    # 3. Map any connection mark on outgoing tcp or udp traffic to a firewall mark on the individual packets.
+    #    These rules /could potentially/ be applied more selectively, according to --tcp-ports and --udp-ports, to make
+    #    a marginal efficiency gain, but this is not necessary: as, if no connection mark has been set, because no
+    #    TOS byte has been set by the load balancer, then none will be restored and legacy routing rules will apply.
+    #    - See https://github.com/newsnowlabs/docker-ingress-routing-daemon/issues/11
+    log "- Adding container mangle table iptables rules"
+    nsenter -n -t $NID iptables -t mangle -A OUTPUT -m comment --comment "$IPTABLE_COMMENT"
+    nsenter -n -t $NID iptables -t mangle -A OUTPUT -p udp -j CONNMARK --restore-mark
+    nsenter -n -t $NID iptables -t mangle -A OUTPUT -p tcp -j CONNMARK --restore-mark
+
+    # 3.1 Enable 'loose' rp_filter mode on interface $CIF (and 'all' as required by kernel
+    #     see https://www.kernel.org/doc/Documentation/networking/ip-sysctl.txt)
+    log "- Setting container sysctl net.ipv4.conf.all.rp_filter=2 net.ipv4.conf.$CIF.rp_filter=2"
+    nsenter -n -t $NID sysctl -q net.ipv4.conf.all.rp_filter=2 net.ipv4.conf.$CIF.rp_filter=2
   fi
     
-  log "Detected container launch for service '$SERVICE', with ID '$ID' and NID '$NID': ingress network interface $CIF found, so applying policy routing/firewall rules:"
-   
-  # 3. Map any connection mark on outgoing tcp or udp traffic to a firewall mark on the individual packets.
-  #    These rules /could potentially/ be applied more selectively, according to --tcp-ports and --udp-ports, to make
-  #    a marginal efficiency gain, but this is not necessary: as, if no connection mark has been set, because no
-  #    TOS byte has been set by the load balancer, then none will be restored and legacy routing rules will apply.
-  #    - See https://github.com/newsnowlabs/docker-ingress-routing-daemon/issues/11
-  log "- Adding container mangle table iptables rules"
-  nsenter -n -t $NID iptables -t mangle -A OUTPUT -m comment --comment "$IPTABLE_COMMENT"
-  nsenter -n -t $NID iptables -t mangle -A OUTPUT -p udp -j CONNMARK --restore-mark
-  nsenter -n -t $NID iptables -t mangle -A OUTPUT -p tcp -j CONNMARK --restore-mark
-
-  # 3.1 Enable 'loose' rp_filter mode on interface $CIF (and 'all' as required by kernel
-  #     see https://www.kernel.org/doc/Documentation/networking/ip-sysctl.txt)
-  log "- Setting container sysctl net.ipv4.conf.all.rp_filter=2 net.ipv4.conf.$CIF.rp_filter=2"
-  nsenter -n -t $NID sysctl -q net.ipv4.conf.all.rp_filter=2 net.ipv4.conf.$CIF.rp_filter=2
-
   local INDEX=1 NODE_IP
   for NODE_IP in ${INGRESS_NODE_GATEWAY_IPS[@]}
   do
@@ -115,6 +115,7 @@ route_ingress() {
 
       # 5. Route outgoing traffic to the correct node's ingress network IP, according to its firewall mark
       #    (which in turn came from its connection mark, its TOS value, and ultimately its IP).
+      nsenter -n -t $NID ip route flush table $NODE_ID 2>/dev/null
       nsenter -n -t $NID ip route add table $NODE_ID default via $NODE_IP 2>/dev/null
     fi
     ((INDEX+=1))
