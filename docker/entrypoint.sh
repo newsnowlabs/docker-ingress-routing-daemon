@@ -217,8 +217,8 @@ else
       fi
       
       if [[ (-n "$LBS_CSV_NEW") && ("$LBS_CSV_NEW" != "$LBS_CSV") ]]; then
-        log "DIND manager updating DIND global service with --ingress-gateway-ips $LBS_CSV_NEW"
-        docker service update -d dind-global --args="--global-service $@ --ingress-gateway-ips $LBS_CSV_NEW" >/dev/null
+        log "DIND manager update DIND global service with: docker service update -d dind-global --args=\"--global-service $* --ingress-gateway-ips $LBS_CSV_NEW\""
+        docker service update -d dind-global --args="--global-service $* --ingress-gateway-ips $LBS_CSV_NEW" >/dev/null
 	
 	LBS_CSV="$LBS_CSV_NEW"
       else
