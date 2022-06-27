@@ -24,7 +24,7 @@ elif [ "$1" = "global-service" ]; then
   shift
   
   # Create global service with hardcoded --ingress-gateway-ips list
-  CMD=(docker service create --name=dind-global --mode=global --env="DOCKER_NODE_HOSTNAME={{.Node.Hostname}}" --mount=type=bind,src=/var/run/docker.sock,dst=/var/run/docker.sock $IMAGE --global-service)
+  CMD=(docker service create --name=dind-global --mode=global --update-parallelism=0 --env="DOCKER_NODE_HOSTNAME={{.Node.Hostname}}" --mount=type=bind,src=/var/run/docker.sock,dst=/var/run/docker.sock $IMAGE --global-service)
 elif [ "$1" = "daemon" ]; then
   shift
 
