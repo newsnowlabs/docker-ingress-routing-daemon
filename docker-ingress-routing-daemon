@@ -108,14 +108,14 @@ route_ingress() {
       log "- Adding container policy routing/firewall rules for load-balancer #$NODE_ID with IP $NODE_IP"
 
       # 2. Map the TOS value on any incoming packets to a connection mark, using the same value.
-      nsenter -n -t $NID iptables -t mangle -A PREROUTING -m tos --tos $NODE_ID/0xff -j CONNMARK --set-xmark $NODE_ID/0xffffffff
+      nsenter -n -t $NID iptables -t mangle -A PREROUTING -m tos --tos $NODE_ID/0xff -j CONNMARK --set-xmark $NODE_ID/0xffffffff 2>/dev/null
 
       # 4. Select the correct routing table to use, according to the firewall mark on the outgoing packet.
-      nsenter -n -t $NID ip rule add from $INGRESS_SUBNET fwmark $NODE_ID lookup $NODE_ID prio 32700
+      nsenter -n -t $NID ip rule add from $INGRESS_SUBNET fwmark $NODE_ID lookup $NODE_ID prio 32700 2>/dev/null
 
       # 5. Route outgoing traffic to the correct node's ingress network IP, according to its firewall mark
       #    (which in turn came from its connection mark, its TOS value, and ultimately its IP).
-      nsenter -n -t $NID ip route add table $NODE_ID default via $NODE_IP
+      nsenter -n -t $NID ip route add table $NODE_ID default via $NODE_IP 2>/dev/null
     fi
     ((INDEX+=1))
   done
