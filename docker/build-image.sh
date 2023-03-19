@@ -1,3 +1,3 @@
 #!/bin/bash
 
-docker build --tag newsnowlabs/dind:latest -f docker/Dockerfile .
+docker build --tag newsnowlabs/dird:latest -f docker/Dockerfile .

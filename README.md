@@ -24,7 +24,7 @@ Typical existing workarounds require running an independent reverse-proxy load-b
 
 ## The solution
 
-The docker-ingress-routing-daemon (DIND) works around this limitation, by inhibiting SNAT masquerading, and instead deploying a combination of firewall and policy routing rules to allow service containers to route reverse-path traffic back to the correct load-balancing node.
+The docker-ingress-routing-daemon (DIRD) works around this limitation, by inhibiting SNAT masquerading, and instead deploying a combination of firewall and policy routing rules to allow service containers to route reverse-path traffic back to the correct load-balancing node.
 
 The way it works is as follows.
 
@@ -55,38 +55,38 @@ N.B. Following production testing, for performance reasons the daemon also perfo
 
 ## Automagic installation via Docker (Experimental)
 
-The simplest way to install DIND is now via Docker.
+The simplest way to install DIRD is now via Docker.
 
-A DIND via Docker installation consists of these components:
+A DIRD via Docker installation consists of these components:
 
 1. _[Optional]_ A manager container or service that autodetects (changes to) load balancer nodes and (re)launches the global service accordingly
 2. The global service, running one container on each swarm node, responsible for reporting the node's ingress IP to the manager, and launching a privileged child container
-3. A privileged child container, launched by the global service container, that actually runs DIND on each node
+3. A privileged child container, launched by the global service container, that actually runs DIRD on each node
 
 e.g.
 
 To launch a manager _service_, run `./docker/create-service.sh --manager-service` from within this git repo, or on any docker swarm manager node just run:
 
 ```
-docker service create --name=dind --replicas=1 --constraint=node.role==manager --mount=type=bind,src=/var/run/docker.sock,dst=/var/run/docker.sock newsnowlabs/dind:latest --install --preexisting
+docker service create --name=dird --replicas=1 --constraint=node.role==manager --mount=type=bind,src=/var/run/docker.sock,dst=/var/run/docker.sock newsnowlabs/dird:latest --install --preexisting
 ```
 
 To launch a manager _container_, run `./docker/create-service.sh --manager` from within this git repo, or on any docker swarm manager just run:
 
 ```
-docker run --name=dind --mount=type=bind,src=/var/run/docker.sock,dst=/var/run/docker.sock newsnowlabs/dind:latest --install --preexisting
+docker run --name=dird --mount=type=bind,src=/var/run/docker.sock,dst=/var/run/docker.sock newsnowlabs/dird:latest --install --preexisting
 ```
 
 To launch a global service directly, run `./docker/create-service.sh --global-service` from within this git repo, or on any docker swarm manager just run:
 
 ```
-docker service create --name=dind-global --mode=global --env="DOCKER_NODE_HOSTNAME={{.Node.Hostname}}" --mount=type=bind,src=/var/run/docker.sock,dst=/var/run/docker.sock newsnowlabs/dind:latest --global-service --install --preexisting
+docker service create --name=dird-global --mode=global --env="DOCKER_NODE_HOSTNAME={{.Node.Hostname}}" --mount=type=bind,src=/var/run/docker.sock,dst=/var/run/docker.sock newsnowlabs/dird:latest --global-service --install --preexisting
 ```
 
 Please note:
 
-- Other command-line options to DIND may be added after `--install` on any of these command lines, and `--preexisting` may be removed if not required (see below)
-- By default, the manager container/service will assume all nodes it detects are load balancers. However, if at least one node has the label `DIND-LB=1`, then only nodes having this label will be considered load balancers.
+- Other command-line options to DIRD may be added after `--install` on any of these command lines, and `--preexisting` may be removed if not required (see below)
+- By default, the manager container/service will assume all nodes it detects are load balancers. However, if at least one node has the label `DIRD-LB=1`, then only nodes having this label will be considered load balancers.
 
 ## Manual installation (Stable)
 
@@ -99,7 +99,7 @@ When installing manually, it's necessary to manually generate a list of the ingr
 Run `docker-ingress-routing-daemon --ingress-gateway-ips <Node Ingress IP List> --install` as root on **_each and every one_** of your load-balancer and/or service container nodes.
 
 It is recommended to do this **_before_** creating your services but if your services are already created you may either:
-- instruct DIND to operate on preexisting service containers by adding the command-line option `--preexisting`.
+- instruct DIRD to operate on preexisting service containers by adding the command-line option `--preexisting`.
 - scale your preexisting non-global services to 0 before scaling them back to a positive number of replicas. The daemon will initialise iptables, detect when docker creates new containers, and apply new routing rules to each new container.
 
 ### Installing using systemd
@@ -137,11 +137,11 @@ Usage: ./docker-ingress-routing-daemon [--install [OPTIONS] | --uninstall | --he
 ## Uninstalling iptables rules
 
 If deployed using Docker:
-1. Tear down any manager container/service or global service you have launched (using either `docker rm dind` or `docker service rm dind` or `docker service rm dind-global`)
+1. Tear down any manager container/service or global service you have launched (using either `docker rm dird` or `docker service rm dird` or `docker service rm dird-global`)
 2. Launch a temporary global service using `./docker/create-service.sh --global-service --uninstall`
-   - Or, using: `docker service create --name=dind-global --mode=global --env="DOCKER_NODE_HOSTNAME={{.Node.Hostname}}" --mount=type=bind,src=/var/run/docker.sock,dst=/var/run/docker.sock newsnowlabs/dind:latest --global-service --uninstall`
-3. Allow time for the temporary service to relaunch DIND with the `--uninstall` option (run `docker service logs -f dind-global` to monitor progress)
-4. Finally, tear down the temporary service using `docker service rm dind-global`
+   - Or, using: `docker service create --name=dird-global --mode=global --env="DOCKER_NODE_HOSTNAME={{.Node.Hostname}}" --mount=type=bind,src=/var/run/docker.sock,dst=/var/run/docker.sock newsnowlabs/dird:latest --global-service --uninstall`
+3. Allow time for the temporary service to relaunch DIRD with the `--uninstall` option (run `docker service logs -f dird-global` to monitor progress)
+4. Finally, tear down the temporary service using `docker service rm dird-global`
 
 If deployed manually:
 - Run `docker-ingress-routing-daemon --uninstall` on each node.

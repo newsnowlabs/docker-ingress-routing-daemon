@@ -26,7 +26,7 @@
 # Workaround for https://github.com/moby/moby/issues/25526
 
 CHILD_IMAGE=""
-CHILD_CTR="dind-child"
+CHILD_CTR="dird-child"
 NODE_LABEL_CHECK_FREQUENCY=15
 DEBUG=0
 
@@ -58,19 +58,19 @@ snore() {
 }
 
 stop_child() {
-  log "DIND global service stopping child container $CHILD_CTR"
+  log "DIRD global service stopping child container $CHILD_CTR"
   docker stop -t 5 "$CHILD_CTR" 2>/dev/null
-  log "DIND global service stopped child container $CHILD_CTR"
+  log "DIRD global service stopped child container $CHILD_CTR"
 }
 
 remove_child() {
-  log "DIND global service removing (any) child container $CHILD_CTR"
+  log "DIRD global service removing (any) child container $CHILD_CTR"
   docker rm -f "$CHILD_CTR" 2>/dev/null
-  log "DIND global service removed (any) child container $CHILD_CTR"
+  log "DIRD global service removed (any) child container $CHILD_CTR"
 }
 
 shutdown_global_service() {
-  log "DIND global service received TERM/INT/QUIT signal, so shutting down"
+  log "DIRD global service received TERM/INT/QUIT signal, so shutting down"
   RUNNING=0
  
   if [ -z "$DOCKER_PID" ]; then
@@ -81,11 +81,11 @@ shutdown_global_service() {
 }
 
 stop_global_service() {
-  docker service rm dind-global >/dev/null
+  docker service rm dird-global >/dev/null
 }
 
 shutdown_manager_service() {
-  log "DIND manager service received TERM/INT/QUIT signal, so shutting down"
+  log "DIRD manager service received TERM/INT/QUIT signal, so shutting down"
   RUNNING=0
   
   stop_global_service
@@ -120,16 +120,16 @@ if [ -z "$CHILD_IMAGE" ]; then
 
   # Determine what image we launched with. Might be:
   # - a local image ID e.g. 9405706ab5ff - N.B. this generally cannot be used to launch an image on separate nodes
-  # - a textual image name e.g. newsnowlabs/dind:latest
-  # - a textual image name and digest e.g. newsnowlabs/dind:latest@sha256:0c02b40d46df4ead415462f6a6e8d514bdbd13dbc546a7a0561f5f9a788c9ca1
+  # - a textual image name e.g. newsnowlabs/dird:latest
+  # - a textual image name and digest e.g. newsnowlabs/dird:latest@sha256:0c02b40d46df4ead415462f6a6e8d514bdbd13dbc546a7a0561f5f9a788c9ca1
   INSPECT_CONFIG_IMAGE=$(docker container inspect -f '{{ .Config.Image }}' $(hostname))
   
   if [ -n "$INSPECT_CONFIG_IMAGE" ]; then
   
     # Determine whether the image we launched with references a repo. Might be:
     # - empty string (no repo)
-    # - a textual image name e.g. newsnowlabs/dind:latest
-    # - a textual image name and digest e.g. newsnowlabs/dind:latest@sha256:0c02b40d46df4ead415462f6a6e8d514bdbd13dbc546a7a0561f5f9a788c9ca1
+    # - a textual image name e.g. newsnowlabs/dird:latest
+    # - a textual image name and digest e.g. newsnowlabs/dird:latest@sha256:0c02b40d46df4ead415462f6a6e8d514bdbd13dbc546a7a0561f5f9a788c9ca1
     INSPECT_REPO_DIGEST=$(docker image inspect $INSPECT_CONFIG_IMAGE -f '{{ join .RepoDigests "\n" }}' | head -n 1)
   
     if [ -n "$INSPECT_REPO_DIGEST" ]; then
@@ -140,7 +140,7 @@ if [ -z "$CHILD_IMAGE" ]; then
   else
   
     # If all else fails, use the default latest image
-    CHILD_IMAGE="newsnowlabs/dind:latest"
+    CHILD_IMAGE="newsnowlabs/dird:latest"
   fi
 fi
 
@@ -149,8 +149,8 @@ RUNNING=1
 if [ "$1" = "--global-service" ]; then
   shift
 
-  log "DIND global service starting up with args: $@"
-  log "DIND global service running on image: $CHILD_IMAGE"
+  log "DIRD global service starting up with args: $@"
+  log "DIRD global service running on image: $CHILD_IMAGE"
 
   trap shutdown_global_service TERM INT QUIT
 
@@ -159,17 +159,17 @@ if [ "$1" = "--global-service" ]; then
   
   while [ $RUNNING -eq 1 ]; do
     detect_ingress
-    log "DIND global service node IP/Node: $INGRESS_DEFAULT_GATEWAY/$DOCKER_NODE_HOSTNAME"
+    log "DIRD global service node IP/Node: $INGRESS_DEFAULT_GATEWAY/$DOCKER_NODE_HOSTNAME"
     snore 3
   done &
   
   while [ $RUNNING -eq 1 ]; do
     # Launch afresh, putting 'docker run' into the background (but not detaching it - we want to log its STDOUT)
-    log "DIND global service launching child container $CHILD_CTR ..."
+    log "DIRD global service launching child container $CHILD_CTR ..."
     docker run --name="$CHILD_CTR" -a stdout -a stderr --rm --privileged --pid=host -v /var/run/docker:/var/run/docker -v /var/run/docker.sock:/var/run/docker.sock $CHILD_IMAGE --daemon "$@" &
 
     DOCKER_PID="$!"
-    log "DIND global service launched child container with PID $DOCKER_PID"
+    log "DIRD global service launched child container with PID $DOCKER_PID"
   
     # Wait for 'docker run' to exit
     wait
@@ -181,33 +181,33 @@ if [ "$1" = "--global-service" ]; then
     [ $RUNNING -eq 1 ] && snore 1
   done
   
-  log "DIND global service shutting down"
+  log "DIRD global service shutting down"
 else
 
-  log "DIND manager service starting up with args: $@"
-  log "DIND manager service running on image: $CHILD_IMAGE"
+  log "DIRD manager service starting up with args: $@"
+  log "DIRD manager service running on image: $CHILD_IMAGE"
   
   stop_global_service
   
-  log "DIND manager service launching global service dind-global ..."
-  docker service create -d --name=dind-global --mode=global --with-registry-auth=true --update-parallelism=0 --env="DOCKER_NODE_HOSTNAME={{.Node.Hostname}}" --mount=type=bind,src=/var/run/docker.sock,dst=/var/run/docker.sock $CHILD_IMAGE --global-service "$@"
+  log "DIRD manager service launching global service dird-global ..."
+  docker service create -d --name=dird-global --mode=global --with-registry-auth=true --update-parallelism=0 --env="DOCKER_NODE_HOSTNAME={{.Node.Hostname}}" --mount=type=bind,src=/var/run/docker.sock,dst=/var/run/docker.sock $CHILD_IMAGE --global-service "$@"
 
   trap shutdown_manager_service TERM INT QUIT
 
   while [ $RUNNING -eq 1 ]; do
   
-    debug "DIND manager running: docker service logs"
+    debug "DIRD manager running: docker service logs"
     
-    LBS_NEW=$(ssv $(docker service logs --raw --since=10s dind-global 2>&1 | grep "DIND global service node IP/Node" | sed -r "s!^.*DIND global service node IP/Node: !!"))
-    debug "DIND manager found logged IP/node list: ${LBS_NEW:-NONE}"
+    LBS_NEW=$(ssv $(docker service logs --raw --since=10s dird-global 2>&1 | grep "DIRD global service node IP/Node" | sed -r "s!^.*DIRD global service node IP/Node: !!"))
+    debug "DIRD manager found logged IP/node list: ${LBS_NEW:-NONE}"
     
     NOW=$(date +%s)
     if [[ (-n "$LBS_NEW") && (("$LBS_NEW" != "$LBS") || ($NOW -gt $LAST_CHECK+$NODE_LABEL_CHECK_FREQUENCY)) ]]; then
     
       if [ "$LBS" != "$LBS_NEW" ]; then
-        log "DIND manager found logged IP/node list changed, from '$LBS' to '$LBS_NEW'"
+        log "DIRD manager found logged IP/node list changed, from '$LBS' to '$LBS_NEW'"
       elif [[ $NOW -gt $LAST_CHECK+$NODE_LABEL_CHECK_FREQUENCY ]]; then
-        log "DIND manager rechecking node labels"
+        log "DIRD manager rechecking node labels"
       fi
       
       declare -A NODETOIP
@@ -218,11 +218,11 @@ else
 	NODETOIP[$NODE]=$IP
       done
       
-      log "DIND manager found swarm nodes: ${!NODETOIP[@]}"
+      log "DIRD manager found swarm nodes: ${!NODETOIP[@]}"
       
-      # Inspect nodes to find those with a 'DIND-LB:1' label; these will be the selected load balancers
-      LB_NODES=$(docker node inspect ${!NODETOIP[@]} --format '{{ .Description.Hostname }} {{ .Spec.Labels }}' | egrep '[\[ ]DIND-LB:1' | awk '{print $1}' | tr '\012' ' ')
-      log "DIND manager selected labelled LB swarm nodes: '$LB_NODES'"
+      # Inspect nodes to find those with a 'DIRD-LB:1' label; these will be the selected load balancers
+      LB_NODES=$(docker node inspect ${!NODETOIP[@]} --format '{{ .Description.Hostname }} {{ .Spec.Labels }}' | egrep '[\[ ]DIRD-LB:1' | awk '{print $1}' | tr '\012' ' ')
+      log "DIRD manager selected labelled LB swarm nodes: '$LB_NODES'"
       
       if [ -n "$LB_NODES" ] || [ "$MODE" = "labelled-lbs-only" ]; then
       
@@ -230,24 +230,24 @@ else
         LBS_IPS=()
         for NODE in $LB_NODES
         do
-          debug "DIND manager selected LB node: $NODE => ${NODETOIP[$NODE]}"
+          debug "DIRD manager selected LB node: $NODE => ${NODETOIP[$NODE]}"
           LBS_IPS+=(${NODETOIP[$NODE]})
         done
 
         LBS_CSV_NEW=$(csv ${LBS_IPS[@]})
-        log "DIND manager selected labelled nodes for LB node CSV: '$LBS_CSV_NEW' (formerly '$LBS_CSV')"
+        log "DIRD manager selected labelled nodes for LB node CSV: '$LBS_CSV_NEW' (formerly '$LBS_CSV')"
       else
         LBS_CSV_NEW=$(csv ${NODETOIP[@]})
-        log "DIND manager selected ALL nodes for LB node CSV: '$LBS_CSV_NEW' (formerly '$LBS_CSV')"
+        log "DIRD manager selected ALL nodes for LB node CSV: '$LBS_CSV_NEW' (formerly '$LBS_CSV')"
       fi
       
       if [[ (-n "$LBS_CSV_NEW") && ("$LBS_CSV_NEW" != "$LBS_CSV") ]]; then
-        log "DIND manager update DIND global service with: docker service update -d dind-global --args=\"--global-service $* --ingress-gateway-ips $LBS_CSV_NEW\""
-        docker service update -d dind-global --args="--global-service $* --ingress-gateway-ips $LBS_CSV_NEW" >/dev/null
+        log "DIRD manager update DIRD global service with: docker service update -d dird-global --args=\"--global-service $* --ingress-gateway-ips $LBS_CSV_NEW\""
+        docker service update -d dird-global --args="--global-service $* --ingress-gateway-ips $LBS_CSV_NEW" >/dev/null
 	
 	LBS_CSV="$LBS_CSV_NEW"
       else
-        log "DIND manager not updating DIND global service, as LB nodes not changed or none selected"
+        log "DIRD manager not updating DIRD global service, as LB nodes not changed or none selected"
       fi
 
       LAST_CHECK="$NOW"
@@ -258,5 +258,5 @@ else
     [ $RUNNING -eq 1 ] && snore 5
   done
   
-  log "DIND manager service shutting down"
+  log "DIRD manager service shutting down"
 fi
