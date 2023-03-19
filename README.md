@@ -104,7 +104,7 @@ It is recommended to do this **_before_** creating your services but if your ser
 
 ### Installing using systemd
 
-To install via systemd, please see the example systemd unit at `etc/systemd/system/dind.service`, which should be copied to `/etc/systemd/system` or `/usr/local/lib/systemd/system` (according to your distribution), and modified to reflect your required arguments. As normal when installing a new systemd unit, run `systemctl daemon-reload`, then enable the unit by running `systemctl enable dind` and if needed start the unit by running `systemctl start dind`.
+To install via systemd, please see the example systemd unit at `etc/systemd/system/dird.service`, which should be copied to `/etc/systemd/system` or `/usr/local/lib/systemd/system` (according to your distribution), and modified to reflect your required arguments. As normal when installing a new systemd unit, run `systemctl daemon-reload`, then enable the unit by running `systemctl enable dird` and if needed start the unit by running `systemctl start dird`.
 
 ## Command-line options
 
