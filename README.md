@@ -1,4 +1,4 @@
-# docker-ingress-routing-daemon
+# docker-ingress-routing-daemon (DIRD)
 
 Docker swarm daemon that modifies ingress mesh routing to expose true client IPs to service containers:
 - implemented _purely through routing and firewall rules_; and so
@@ -57,17 +57,32 @@ N.B. Following production testing, for performance reasons the daemon also perfo
 
 ### Setting up
 
-Generate a list of the ingress network IPs of the nodes you intend to use as load balancers in your swarm.  You do this by running `docker-ingress-routing-daemon` as root on every one of your swarm's nodes **_that you'd like to use as a load-balancer endpoint_**, noting the ingress network IP shown. You only have to do this once, or whenever you add or remove nodes. Your ingress network IPs should look something like `10.0.0.2 10.0.0.3 10.0.0.4 10.0.0.5` (according to the subnet defined for the ingress network, and the number of nodes; IPs will not necessarily be sequential).  
+**Firstly**, generate a list of the ingress network IPs of the nodes you intend to use as load balancers in your swarm.  You do this by running `docker-ingress-routing-daemon` as root on **_every one of your swarm's nodes that you'd like to use as a load-balancer endpoint_**, noting the ingress network IP shown. You only have to do this once, or whenever you add or remove nodes. Your ingress network IPs should look something like `10.0.0.2 10.0.0.3 10.0.0.4 10.0.0.5` (according to the subnet defined for the ingress network, and the number of nodes; IPs will not necessarily be sequential).
+
+> Use this IP list to generate the `--ingress-gateway-ips <Node Ingress IP List>` command line option. The IP list may be comma-separated or space-separated.
+
+> N.B. Common gotcha: the list should not normally contain `10.0.0.1`; this is the gateway IP of the default `ingress` network but **WILL NOT BE** the IP of any node within that default network.
+
+**Secondly**, for most use-cases it is advisable to whitelist (i.e. restrict the daemon’s installation of routing and firewall rules) to those specific ingress services you need. Run `docker service ls` to see what TCP and UDP ports your services publish.
+
+> Use this service and protocol/port list to generate the `--services <Service List>` and `--tcp-ports <tcp-ports>` and/or `--udp-ports <udp-ports>` command line options. Services and ports may be comma-separated or space-separated, or these options may be specified multiple times.
+
+> N.B. If you do not specify `--services` and `--tcp-ports` / `--udp-ports` then *ALL* service containers with an ingress network interface will be reconfigured and your access to non-service containers publishing ports might freeze.
 
 ### Running the daemon
 
-Run `docker-ingress-routing-daemon --ingress-gateway-ips <Node Ingress IP List> --install` as root on **_each and every one_** of your load-balancer and/or service container nodes **_before_** creating your service. (If your service is already created, then ensure you scale it to 0 before scaling it back to a positive number of replicas.) The daemon will initialise iptables, detect when docker creates new containers, and apply new routing rules to each new container.  
+Having prepared your command line options (collectively, `[OPTIONS]`), run the following **as root** on **_each and every one_** of your load-balancer and/or service container nodes:
 
-If you need to restrict the daemon’s installation of routing and firewall rules within launched containers to containers for specific services, then add `--services <Service List>`.
+```
+docker-ingress-routing-daemon --install --preexisting [OPTIONS]
+```
 
-If you do not use `--services` then all service containers with an ingress network interface will be configured by the daemon.
+(You may omit `--preexisting` but, if so, then you **must** _either_ launch DIRD **_before_** creating your service, _or_ -- if your service is already created -- scale your service to 0 before scaling it back to a positive number of replicas.)
 
-If you need to restrict the daemons activities to the specific TCP or UDP ports published by the above services, then add `--tcp-ports <ports>` or `--udp-ports <ports>`, or both. If you do not use these options then all IPVS traffic routed by the node will be routed to service containers instead of masqueraded.
+The DIRD daemon will:
+- initialise iptables to disable masquerading for the whitelisted TCP/UDP ports;
+- apply new routing rules for the whitelisted ports to each preexisting whitelisted service container;
+- loop, monitoring for when docker creates new whitelisted containers and then applying new routing rules for the whitelisted ports to each new container.
 
 For detailed daemon usage, run:
 
@@ -75,15 +90,16 @@ For detailed daemon usage, run:
 # ./docker-ingress-routing-daemon
 Usage: ./docker-ingress-routing-daemon [--install [OPTIONS] | --uninstall | --help]
 
-           --services <services>  - service names to disable masquerading for
-             --tcp-ports <ports>  - TCP ports to disable masquerading for
-             --udp-ports <ports>  - UDP ports to disable masquerading for
+           --services <services>  - service names to whitelist (i.e. disable masquerading for)
+         --tcp-ports <tcp-ports>  - TCP ports to whitelist (i.e. disable masquerading for)
+         --udp-ports <udp-ports>  - UDP ports to whitelist (i.e. disable masquerading for)
      --ingress-gateway-ips <ips>  - specify load-balance ingress IPs
+                   --preexisting  - optionally install rules where needed
+                                    on preexisting containers (recommended)
+                                    
                 --no-performance  - disable performance optimisations
                    --indexed-ids  - use sequential ids for load balancers
                                     (forced where ingress subnet larger than /24)
-                   --preexisting  - optionally install rules where needed
-                                    on preexisting containers
 
     (services, ports and IPs may be comma or space-separated or may be specified
      multiple times)
