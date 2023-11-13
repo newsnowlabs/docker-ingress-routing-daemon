@@ -100,6 +100,9 @@ Usage: ./docker-ingress-routing-daemon [--install [OPTIONS] | --uninstall | --he
                 --no-performance  - disable performance optimisations
                    --indexed-ids  - use sequential ids for load balancers
                                     (forced where ingress subnet larger than /24)
+                                    
+                 --iptables-wait  - pass '--iptables-wait' option to iptables
+     --iptables-wait-seconds <n>  - pass '--iptables-wait <n>' option to iptables
 
     (services, ports and IPs may be comma or space-separated or may be specified
      multiple times)
