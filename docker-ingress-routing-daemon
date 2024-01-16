@@ -28,6 +28,13 @@ VERSION=4.1.1
 # Workaround for https://github.com/moby/moby/issues/25526
 
 log() {
+  if [ -n "${JOURNAL_STREAM}" ]
+  then
+    # Launched with systemd and journald
+    echo "$@"
+    return
+  fi
+
   [ -z "$_BASHPID" ] && _BASHPID="$BASHPID"
   local D=$(date +%Y-%m-%d.%H:%M:%S.%N)
   local S=$(printf "%s|%s|%05d|" "${D:0:26}" "$HOSTNAME" "$_BASHPID")
