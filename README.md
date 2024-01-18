@@ -69,6 +69,8 @@ N.B. Following production testing, for performance reasons the daemon also perfo
 
 > N.B. If you do not specify `--services` and `--tcp-ports` / `--udp-ports` then *ALL* service containers with an ingress network interface will be reconfigured and your access to non-service containers publishing ports might freeze.
 
+> **WARNING:** The use of `--iptables-wait` or `--iptables-wait <n>` is strongly advised if your systems run `firewalld` or another process that performs high-frequency access to iptables. In such scenarios the xtables lock could be held, inhibiting DIRD making successful calls to iptables and producing the error *"Another app is currently holding the xtables lock"*. The use of these options should be harmless in other cases.
+
 ### Running the daemon
 
 Having prepared your command line options (collectively, `[OPTIONS]`), run the following **as root** on **_each and every one_** of your load-balancer and/or service container nodes:
@@ -100,6 +102,9 @@ Usage: ./docker-ingress-routing-daemon [--install [OPTIONS] | --uninstall | --he
                 --no-performance  - disable performance optimisations
                    --indexed-ids  - use sequential ids for load balancers
                                     (forced where ingress subnet larger than /24)
+                                    
+                 --iptables-wait  - pass '--iptables-wait' option to iptables
+     --iptables-wait-seconds <n>  - pass '--iptables-wait <n>' option to iptables
 
     (services, ports and IPs may be comma or space-separated or may be specified
      multiple times)

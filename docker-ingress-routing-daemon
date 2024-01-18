@@ -1,9 +1,10 @@
 #!/bin/bash
 
-VERSION=4.1.2
+VERSION=4.2.0
+IPTABLES_OPTS=()
 
-# Ingress Routing Daemon v4.1.2
-# Copyright © 2020-2021 Struan Bartlett
+# Ingress Routing Daemon v4.2.0
+# Copyright © 2020-2023 Struan Bartlett
 # ----------------------------------------------------------------------
 # Permission is hereby granted, free of charge, to any person 
 # obtaining a copy of this software and associated documentation files 
@@ -79,7 +80,7 @@ route_ingress() {
   fi
 
   local IPTABLE_COMMENT="docker-ingress-routing-daemon"
-  if nsenter -n -t $NID iptables -t mangle -C OUTPUT -m comment --comment "$IPTABLE_COMMENT" 2>/dev/null; then
+  if nsenter -n -t $NID iptables "${IPTABLES_OPTS[@]}" -t mangle -C OUTPUT -m comment --comment "$IPTABLE_COMMENT" 2>/dev/null; then
     log "Detected container for service '$SERVICE', with ID '$ID' and NID '$NID': mangle table already configured, so skipping."
     return
   fi
@@ -92,9 +93,9 @@ route_ingress() {
   #    TOS byte has been set by the load balancer, then none will be restored and legacy routing rules will apply.
   #    - See https://github.com/newsnowlabs/docker-ingress-routing-daemon/issues/11
   log "- Adding container mangle table iptables rules"
-  nsenter -n -t $NID iptables -t mangle -A OUTPUT -m comment --comment "$IPTABLE_COMMENT"
-  nsenter -n -t $NID iptables -t mangle -A OUTPUT -p udp -j CONNMARK --restore-mark
-  nsenter -n -t $NID iptables -t mangle -A OUTPUT -p tcp -j CONNMARK --restore-mark
+  nsenter -n -t $NID iptables "${IPTABLES_OPTS[@]}" -t mangle -A OUTPUT -m comment --comment "$IPTABLE_COMMENT"
+  nsenter -n -t $NID iptables "${IPTABLES_OPTS[@]}" -t mangle -A OUTPUT -p udp -j CONNMARK --restore-mark
+  nsenter -n -t $NID iptables "${IPTABLES_OPTS[@]}" -t mangle -A OUTPUT -p tcp -j CONNMARK --restore-mark
 
   # 3.1 Enable 'loose' rp_filter mode on interface $CIF (and 'all' as required by kernel
   #     see https://www.kernel.org/doc/Documentation/networking/ip-sysctl.txt)
@@ -114,7 +115,7 @@ route_ingress() {
       log "- Adding container policy routing/firewall rules for load-balancer #$NODE_ID with IP $NODE_IP"
 
       # 2. Map the TOS value on any incoming packets to a connection mark, using the same value.
-      nsenter -n -t $NID iptables -t mangle -A PREROUTING -m tos --tos $NODE_ID/0xff -j CONNMARK --set-xmark $NODE_ID/0xffffffff
+      nsenter -n -t $NID iptables "${IPTABLES_OPTS[@]}" -t mangle -A PREROUTING -m tos --tos $NODE_ID/0xff -j CONNMARK --set-xmark $NODE_ID/0xffffffff
 
       # 4. Select the correct routing table to use, according to the firewall mark on the outgoing packet.
       nsenter -n -t $NID ip rule add from $INGRESS_SUBNET fwmark $NODE_ID lookup $NODE_ID prio 32700
@@ -139,6 +140,9 @@ usage() {
   echo "   --ingress-gateway-ips <ips>   - specify load-balancer ingress IPs" >&2
   echo "                 --preexisting   - optionally install rules where needed" >&2
   echo "                                   on preexisting containers (recommended)" >&2
+  echo >&2
+  echo "               --iptables-wait   - pass '--wait' option to iptables" >&2
+  echo "   --iptables-wait-seconds <n>   - pass '--wait <n>' option to iptables" >&2
   echo >&2
   echo "              --no-performance   - disable performance optimisations" >&2
   echo "                 --indexed-ids   - use sequential ids for load balancers" >&2
@@ -177,6 +181,8 @@ do
         --no-performance) shift; PERFORMANCE=0; continue; ;;
            --indexed-ids) shift; INDEXED_IDS=1; continue; ;;
            --preexisting) shift; PREEXISTING=1; continue; ;;
+         --iptables-wait) shift; IPTABLES_WAIT=1; continue; ;;
+ --iptables-wait-seconds) shift; IPTABLES_WAIT=1; IPTABLES_WAIT_SECONDS="$1"; shift; continue; ;;
 
                -h|--help) usage; ;;
                       '') break; ;;
@@ -187,6 +193,9 @@ done
 
 # Display usage, unless --install or --uninstall
 [ -z "$INSTALL" ] && usage
+
+# Add '--iptables-wait' or '--iptables-wait $IPTABLES_WAIT_SECONDS' to iptables options
+[ -n "$IPTABLES_WAIT" ] && IPTABLES_OPTS+=(--wait $IPTABLES_WAIT_SECONDS)
 
 # Convert arrays to comma-separated strings
 TCPServicePortString=$(echo ${TCP_PORTS[@]} | tr ' ' ',')
@@ -215,31 +224,31 @@ fi
 # Delete any relevant preexisting rules.
 log "Cleaning up any stale load-balancer rules ..."
 
-nsenter --net=/var/run/docker/netns/ingress_sbox iptables -t nat -S | \
+nsenter --net=/var/run/docker/netns/ingress_sbox iptables "${IPTABLES_OPTS[@]}" -t nat -S | \
   grep -- '-m ipvs --ipvs -j ACCEPT' | \
   sed -r 's/^-A /-D /' | \
   while read RULE; \
   do
-    log "- Deleting old rule: iptables -t nat $RULE"
-    nsenter --net=/var/run/docker/netns/ingress_sbox iptables -t nat $RULE
+    log "- Deleting old rule: iptables "${IPTABLES_OPTS[@]}" -t nat $RULE"
+    nsenter --net=/var/run/docker/netns/ingress_sbox iptables "${IPTABLES_OPTS[@]}" -t nat $RULE
   done
 
-nsenter --net=/var/run/docker/netns/ingress_sbox iptables -t mangle -S | \
+nsenter --net=/var/run/docker/netns/ingress_sbox iptables "${IPTABLES_OPTS[@]}" -t mangle -S | \
   grep -- '-j TOS --set-tos' | \
   sed -r 's/^-A /-D /' | \
   while read RULE; \
   do
-    log "- Deleting old rule: iptables -t mangle $RULE"
-    nsenter --net=/var/run/docker/netns/ingress_sbox iptables -t mangle $RULE
+    log "- Deleting old rule: iptables "${IPTABLES_OPTS[@]}" -t mangle $RULE"
+    nsenter --net=/var/run/docker/netns/ingress_sbox iptables "${IPTABLES_OPTS[@]}" -t mangle $RULE
   done
 
-nsenter --net=/var/run/docker/netns/ingress_sbox iptables -t raw -S | \
+nsenter --net=/var/run/docker/netns/ingress_sbox iptables "${IPTABLES_OPTS[@]}" -t raw -S | \
   grep -- '-j CT --notrack' | \
   sed -r 's/^-A /-D /' | \
   while read RULE; \
   do
-    log "- Deleting old rule: iptables -t raw $RULE"
-    nsenter --net=/var/run/docker/netns/ingress_sbox iptables -t raw $RULE
+    log "- Deleting old rule: iptables "${IPTABLES_OPTS[@]}" -t raw $RULE"
+    nsenter --net=/var/run/docker/netns/ingress_sbox iptables "${IPTABLES_OPTS[@]}" -t raw $RULE
   done
 
 if [ "$INSTALL" = "0" ]; then
@@ -309,39 +318,39 @@ if [ -n "$NODE_ID" ]; then
 
   # Add a rule ahead of the ingress network SNAT rule, that will cause the SNAT rule to be skipped.
   if [ -z "$TCPServicePortString" ] && [ -z "$UDPServicePortString" ]; then
-    log "- Adding ingress_sbox iptables nat rule: iptables -t nat -I POSTROUTING -d $INGRESS_SUBNET -m ipvs --ipvs -j ACCEPT"
-    nsenter --net=/var/run/docker/netns/ingress_sbox iptables -t nat -I POSTROUTING -d $INGRESS_SUBNET -m ipvs --ipvs -j ACCEPT
+    log "- Adding ingress_sbox iptables nat rule: iptables "${IPTABLES_OPTS[@]}" -t nat -I POSTROUTING -d $INGRESS_SUBNET -m ipvs --ipvs -j ACCEPT"
+    nsenter --net=/var/run/docker/netns/ingress_sbox iptables "${IPTABLES_OPTS[@]}" -t nat -I POSTROUTING -d $INGRESS_SUBNET -m ipvs --ipvs -j ACCEPT
 
     # 1. Set TOS to NODE_ID in all outgoing packets to INGRESS_SUBNET
-    log "- Adding ingress_sbox iptables mangle rule: iptables -t mangle -A POSTROUTING -d $INGRESS_SUBNET -j TOS --set-tos $NODE_ID/0xff"
-    nsenter --net=/var/run/docker/netns/ingress_sbox iptables -t mangle -A POSTROUTING -d $INGRESS_SUBNET -j TOS --set-tos $NODE_ID/0xff
+    log "- Adding ingress_sbox iptables mangle rule: iptables "${IPTABLES_OPTS[@]}" -t mangle -A POSTROUTING -d $INGRESS_SUBNET -j TOS --set-tos $NODE_ID/0xff"
+    nsenter --net=/var/run/docker/netns/ingress_sbox iptables "${IPTABLES_OPTS[@]}" -t mangle -A POSTROUTING -d $INGRESS_SUBNET -j TOS --set-tos $NODE_ID/0xff
 
-    log "- Adding ingress_sbox connection tracking disable rule: iptables -t raw -I PREROUTING -j CT --notrack"
-    nsenter --net=/var/run/docker/netns/ingress_sbox iptables -t raw -I PREROUTING -j CT --notrack
+    log "- Adding ingress_sbox connection tracking disable rule: iptables "${IPTABLES_OPTS[@]}" -t raw -I PREROUTING -j CT --notrack"
+    nsenter --net=/var/run/docker/netns/ingress_sbox iptables "${IPTABLES_OPTS[@]}" -t raw -I PREROUTING -j CT --notrack
   else
 
     if [ -n "$TCPServicePortString" ]; then
-      log "- Adding ingress_sbox iptables nat rule: iptables -t nat -I POSTROUTING -d $INGRESS_SUBNET -p tcp -m multiport --dports $TCPServicePortString -m ipvs --ipvs -j ACCEPT"
-      nsenter --net=/var/run/docker/netns/ingress_sbox iptables -t nat -I POSTROUTING -d $INGRESS_SUBNET -p tcp -m multiport --dports $TCPServicePortString -m ipvs --ipvs -j ACCEPT
+      log "- Adding ingress_sbox iptables nat rule: iptables "${IPTABLES_OPTS[@]}" -t nat -I POSTROUTING -d $INGRESS_SUBNET -p tcp -m multiport --dports $TCPServicePortString -m ipvs --ipvs -j ACCEPT"
+      nsenter --net=/var/run/docker/netns/ingress_sbox iptables "${IPTABLES_OPTS[@]}" -t nat -I POSTROUTING -d $INGRESS_SUBNET -p tcp -m multiport --dports $TCPServicePortString -m ipvs --ipvs -j ACCEPT
 
       # 1. Set TOS to NODE_ID in all outgoing packets to INGRESS_SUBNET
-      log "- Adding ingress_sbox iptables mangle rule: iptables -t mangle -A POSTROUTING -d $INGRESS_SUBNET -p tcp -m multiport --dports $TCPServicePortString -j TOS --set-tos $NODE_ID/0xff"
-      nsenter --net=/var/run/docker/netns/ingress_sbox iptables -t mangle -A POSTROUTING -d $INGRESS_SUBNET -p tcp -m multiport --dports $TCPServicePortString -j TOS --set-tos $NODE_ID/0xff
+      log "- Adding ingress_sbox iptables mangle rule: iptables "${IPTABLES_OPTS[@]}" -t mangle -A POSTROUTING -d $INGRESS_SUBNET -p tcp -m multiport --dports $TCPServicePortString -j TOS --set-tos $NODE_ID/0xff"
+      nsenter --net=/var/run/docker/netns/ingress_sbox iptables "${IPTABLES_OPTS[@]}" -t mangle -A POSTROUTING -d $INGRESS_SUBNET -p tcp -m multiport --dports $TCPServicePortString -j TOS --set-tos $NODE_ID/0xff
 
-      log "- Adding ingress_sbox connection tracking disable rule: iptables -t raw -I PREROUTING -p tcp -m multiport --dports $TCPServicePortString -j CT --notrack"
-      nsenter --net=/var/run/docker/netns/ingress_sbox iptables -t raw -I PREROUTING -p tcp -m multiport --dports $TCPServicePortString -j CT --notrack
+      log "- Adding ingress_sbox connection tracking disable rule: iptables "${IPTABLES_OPTS[@]}" -t raw -I PREROUTING -p tcp -m multiport --dports $TCPServicePortString -j CT --notrack"
+      nsenter --net=/var/run/docker/netns/ingress_sbox iptables "${IPTABLES_OPTS[@]}" -t raw -I PREROUTING -p tcp -m multiport --dports $TCPServicePortString -j CT --notrack
     fi
 
     if [ -n "$UDPServicePortString" ]; then
-      log "- Adding ingress_sbox iptables nat rule: iptables -t nat -I POSTROUTING -d $INGRESS_SUBNET -p udp -m multiport --dports $UDPServicePortString -m ipvs --ipvs -j ACCEPT"
-      nsenter --net=/var/run/docker/netns/ingress_sbox iptables -t nat -I POSTROUTING -d $INGRESS_SUBNET -p udp -m multiport --dports $UDPServicePortString -m ipvs --ipvs -j ACCEPT
+      log "- Adding ingress_sbox iptables nat rule: iptables "${IPTABLES_OPTS[@]}" -t nat -I POSTROUTING -d $INGRESS_SUBNET -p udp -m multiport --dports $UDPServicePortString -m ipvs --ipvs -j ACCEPT"
+      nsenter --net=/var/run/docker/netns/ingress_sbox iptables "${IPTABLES_OPTS[@]}" -t nat -I POSTROUTING -d $INGRESS_SUBNET -p udp -m multiport --dports $UDPServicePortString -m ipvs --ipvs -j ACCEPT
 
       # 1. Set TOS to NODE_ID in all outgoing packets to INGRESS_SUBNET
-      log "- Adding ingress_sbox iptables mangle rule: iptables -t mangle -A POSTROUTING -d $INGRESS_SUBNET -p udp -m multiport --dports $UDPServicePortString -j TOS --set-tos $NODE_ID/0xff"
-      nsenter --net=/var/run/docker/netns/ingress_sbox iptables -t mangle -A POSTROUTING -d $INGRESS_SUBNET -p udp -m multiport --dports $UDPServicePortString -j TOS --set-tos $NODE_ID/0xff
+      log "- Adding ingress_sbox iptables mangle rule: iptables "${IPTABLES_OPTS[@]}" -t mangle -A POSTROUTING -d $INGRESS_SUBNET -p udp -m multiport --dports $UDPServicePortString -j TOS --set-tos $NODE_ID/0xff"
+      nsenter --net=/var/run/docker/netns/ingress_sbox iptables "${IPTABLES_OPTS[@]}" -t mangle -A POSTROUTING -d $INGRESS_SUBNET -p udp -m multiport --dports $UDPServicePortString -j TOS --set-tos $NODE_ID/0xff
 
       log "- Adding ingress_sbox connection tracking disable rule: iptables -p udp -m multiport --dports $UDPServicePortString -j CT --notrack"
-      nsenter --net=/var/run/docker/netns/ingress_sbox iptables -t raw -I PREROUTING -p udp -m multiport --dports $UDPServicePortString -j CT --notrack
+      nsenter --net=/var/run/docker/netns/ingress_sbox iptables "${IPTABLES_OPTS[@]}" -t raw -I PREROUTING -p udp -m multiport --dports $UDPServicePortString -j CT --notrack
     fi
 
   fi
