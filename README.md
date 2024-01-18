@@ -122,6 +122,14 @@ Run `docker-ingress-routing-daemon --uninstall` on each node.
 
 The docker-ingress-routing-daemon can be tested on a single-node or multi-node docker swarm.
 
+An automated test is included in the [RunCVM](https://github.com/newsnowlabs/runcvm) repo. Run it with:
+
+```sh
+git clone https://github.com/newsnowlabs/runcvm.git && \
+cd runcvm/tests/00-http-docker-swarm && \
+NODES=3 DIRD=1 ./test
+```
+
 ## Production testing
 
 The docker-ingress-routing-daemon is used in production on the website https://www.newsnow.co.uk/, currently handling in excess of 1,000 requests per second.
