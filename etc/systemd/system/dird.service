@@ -4,7 +4,21 @@ After=sysinit.target docker.service
 StartLimitIntervalSec=0
 
 [Service]
-ExecStart=/usr/local/bin/docker-ingress-routing-daemon --install --preexisting --iptables-wait --ingress-gateway-ips 10.0.0.2
+# === WARNING ===
+#
+# BEFORE installing this service you MUST update the value for --ingress-gateway-ips
+# (a comma-separated ingress network IP list) in the ExecStart command below, to match your cluster.
+# 
+# You can obtain the ingress network IP for each node by running docker-ingress-routing-daemon manually,
+# as root, with no arguments.
+#
+# Do this on every node that you use (or might intend to use) as a load-balancer endpoint for public traffic,
+# combine the displayed IPs into a comma-separated list, and update the ExecStart command below accordingly.
+#
+# You only have to do this once, or whenever you add or remove nodes.
+#
+# See https://github.com/newsnowlabs/docker-ingress-routing-daemon?tab=readme-ov-file#setting-up
+ExecStart=/usr/local/bin/docker-ingress-routing-daemon --install --preexisting --iptables-wait --ingress-gateway-ips 10.0.0.2,10.0.0.3
 Restart=always
 
 [Install]
