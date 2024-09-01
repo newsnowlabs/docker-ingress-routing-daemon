@@ -1,6 +1,6 @@
 [Unit]
 Description=Docker Ingress Routing Daemon
-After=sysinit.target dockerd.service
+After=sysinit.target docker.service
 StartLimitIntervalSec=0
 
 [Service]
