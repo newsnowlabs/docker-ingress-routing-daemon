@@ -4,7 +4,7 @@ After=sysinit.target docker.service
 StartLimitIntervalSec=0
 
 [Service]
-ExecStart=/usr/local/bin/docker-ingress-routing-daemon --ingress-gateway-ips 10.0.0.2 --install
+ExecStart=/usr/local/bin/docker-ingress-routing-daemon --install --preexisting --iptables-wait --ingress-gateway-ips 10.0.0.2
 Restart=always
 
 [Install]
