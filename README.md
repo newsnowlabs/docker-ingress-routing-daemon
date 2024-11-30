@@ -118,7 +118,43 @@ To install via systemd, please see the example systemd unit at `etc/systemd/syst
 
 Run `docker-ingress-routing-daemon --uninstall` on each node.
 
-## Testing
+## Migrating a running production swarm to use DIRD
+
+### DIRD daemon options
+
+Recommendations for launching DIRD on a running swarm:
+
+1. Work out the `<ips>` argument for `--ingress-gateway-ips <ips>` carefully in advance - getting this wrong will easily break things.
+   - A command to run on a manager to generate `<ips>` is `docker node ls --format "{{.Hostname}}" | pdsh -N -R ssh -w - "docker network inspect ingress --format '{{index (split (index .Containers \"ingress-sbox\").IPv4Address \"/\") 0}}' 2>/dev/null" | sort -t . -n -k 1,1 -k 2,2 -k 3,3 -k 4,4'` (`pdsh` and `ssh` needed) though N.B. this `<ips>` list is overkill if you only use a subset of nodes as load balancers.
+   - Be sure to embed `<ips>` in double quotes if it contains spaces e.g. `--ingress-gateway-ips "10.0.0.2 10.0.0.3"`; otherwise separate IPs with commas e.g. `--ingress-gateway-ips 10.0.0.2,10.0.0.3`.
+2. Use the `--preexisting` option so that when DIRD is launched it applies policy routing rules to each matching preexisting container.
+3. Use `--services <services>`, `--tcp-ports <tcp-ports>` and if you need it `--udp-ports <udp-ports>` to whitelist DIRD behaviour for _only_ the specific swarm services and ports that you need to.
+4. Use `--iptables-wait` or `--iptables-wait-seconds <n>` to avoid possible errors resulting from contention with other firewall apps for the iptables lock.
+5. Using a set of `[OPTIONS]` derived accordingly, prepare a `dird.service` [systemd unit](https://github.com/newsnowlabs/docker-ingress-routing-daemon?tab=readme-ov-file#installing-using-systemd) that launches `docker-ingress-routing-daemon --install [OPTIONS]` and deploy it (to `/etc/systemd/system`, or `/usr/local/lib/systemd/system` according to your distribution) to all swarm nodes (whether load balancer and/or service container nodes).
+6. Enable - without running - the systemd unit across all nodes using e.g. `docker node ls --format "{{.Hostname}}" | pdsh -R ssh -w - 'systemctl daemon-reload; systemctl enable dird'`.
+
+###  DIRD rollout strategy
+
+During the migration to DIRD, if you can restrict incoming public requests to a subset of your nodes (i.e. nodes you nominate as "load balancers"), a recipe that works very smoothly is as follows:
+
+1. First, launch DIRD (`systemctl start dird`), fully configured, on all nominated non-load-balancer nodes. (This will **_not_** break connection handling, as long as the incoming connections are terminated by a nominated load-balancer node not yet running DIRD.)
+2. Second, bring up DIRD simultaneously on all remaining nodes, i.e. on the nominated load-balancer nodes.
+
+Put another way, before launching DIRD on some node(s), make sure you have previously removed their public load-balancer IPs from the pool of load balancer endpoints your public requests are reaching. Repeat the process as many times as needed until you are left with a minimal set of load balancer node(s). Finally launch DIRD on the remaining load balancer node(s).
+
+This works because:
+- Nodes already running DIRD will be able to load-balance _only_ to containers on nodes already running DIRD.
+- Nodes not yet running DIRD will be able to load-balance to containers, both on nodes already running and not yet running DIRD.
+
+## Adding new load-balancer nodes or bringing existing nodes into service as load-balancers
+
+If you add load-balancer nodes to your swarm - or want to start using existing nodes as load-balancer nodes - you will need to tread carefully as existing containers will not know how to route traffic back to the new load balancer node for public connections terminated on that node. We recommend the following procedure:
+
+1. Restart the `docker-ingress-routing-daemon` _across your cluster_ with an updated IP list for `--ingress-gateway-ips <ips>`.
+2. Perform a rolling update of _all service containers_, so that they will have updated policy routing rules installed referencing the new nodes ingress gateway IPs.
+3. Bring your new load-balancer nodes into service, allowing public internet traffic to reach them.
+
+## Testing modifications to DIRD
 
 The docker-ingress-routing-daemon can be tested on a single-node or multi-node docker swarm.
 
@@ -137,13 +173,6 @@ The docker-ingress-routing-daemon is used in production on the website https://w
 We run the daemon on all 10 nodes of our swarm, of which currently only two serve as load balancers for incoming web traffic. The two load-balancer nodes direct traffic to service containers running on the remaining nodes.
 
 Using the daemon, we have been able to avoid significant changes to our tech stack, which used to run native IPVS load-balancing, or to our application's internals (which relied upon identifying the requesting client's IP address for geolocation and security purposes).
-
-## Adding new load-balancer nodes or bringing existing nodes into service as load-balancers
-
-If you add load-balancer nodes to your swarm - or want to start using existing nodes as load-balancer nodes - you will need to tread carefully as existing containers will not be able to route traffic back to the new endpoint nodes. We recommend the following procedure:
-1. Restart the `docker-ingress-routing-daemon` _across your cluster_ with the updated IP list for `--ingress-gateway-ips`
-2. Perform a rolling update of _all service containers_, so that they will have updated policy routing rules installed referencing the new nodes ingress gateway IPs
-3. Bring your new load-balancer nodes into service, allowing public internet traffic to reach them.
 
 ## Limitations
 
