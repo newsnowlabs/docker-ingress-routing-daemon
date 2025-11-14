@@ -402,7 +402,7 @@ log "Launching docker event watcher to monitor for container launches (pgroup $$
 # to ensure return path traffic for incoming connections is routed back via the correct interface
 # and to the correct node from which the incoming connection was received.
 docker events \
-  --format '{{.ID}} {{index .Actor.Attributes "com.docker.swarm.service.name"}}' \
+  --format '{{.Actor.ID}} {{index .Actor.Attributes "com.docker.swarm.service.name"}}' \
   --filter 'event=start' \
   --filter 'type=container' | \
   while read ID SERVICE
