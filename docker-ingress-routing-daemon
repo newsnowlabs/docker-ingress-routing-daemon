@@ -86,14 +86,13 @@ route_ingress() {
   fi
     
   log "Detected container launch for service '$SERVICE', with ID '$ID' and NID '$NID': ingress network interface $CIF found, so applying policy routing/firewall rules:"
-   
+
   # 3. Map any connection mark on outgoing tcp or udp traffic to a firewall mark on the individual packets.
   #    These rules /could potentially/ be applied more selectively, according to --tcp-ports and --udp-ports, to make
   #    a marginal efficiency gain, but this is not necessary: as, if no connection mark has been set, because no
   #    TOS byte has been set by the load balancer, then none will be restored and legacy routing rules will apply.
   #    - See https://github.com/newsnowlabs/docker-ingress-routing-daemon/issues/11
   log "- Adding container mangle table iptables rules"
-  nsenter -n -t $NID iptables "${IPTABLES_OPTS[@]}" -t mangle -A OUTPUT -m comment --comment "$IPTABLE_COMMENT"
   nsenter -n -t $NID iptables "${IPTABLES_OPTS[@]}" -t mangle -A OUTPUT -p udp -j CONNMARK --restore-mark
   nsenter -n -t $NID iptables "${IPTABLES_OPTS[@]}" -t mangle -A OUTPUT -p tcp -j CONNMARK --restore-mark
 
@@ -126,6 +125,11 @@ route_ingress() {
     fi
     ((INDEX+=1))
   done
+
+  # Add the marker rule last, so it only exists when the full configuration is in place.
+  # This prevents a false-positive skip on DIRD restart if DIRD was interrupted mid-configuration.
+  nsenter -n -t $NID iptables "${IPTABLES_OPTS[@]}" -t mangle -A OUTPUT -m comment --comment "$IPTABLE_COMMENT"
+
   log "- Finished configuring launched container"
 }
 
