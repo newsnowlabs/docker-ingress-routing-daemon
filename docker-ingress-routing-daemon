@@ -102,6 +102,14 @@ route_ingress() {
   log "- Setting container sysctl net.ipv4.conf.all.rp_filter=2 net.ipv4.conf.$CIF.rp_filter=2"
   nsenter -n -t $NID sysctl -q net.ipv4.conf.all.rp_filter=2 net.ipv4.conf.$CIF.rp_filter=2
 
+  # 3.2 Enable tcp_fwmark_accept, so that accepted TCP sockets inherit the firewall mark of the incoming SYN
+  #     (see 2.1 below). The SYN-ACK and the socket's initial route, and so its advertised and sending MSS,
+  #     are then derived from the policy route via the ingress network, instead of from the container's
+  #     default route (typically docker_gwbridge, whose MTU may exceed that of the ingress network).
+  #     - See https://github.com/newsnowlabs/docker-ingress-routing-daemon/issues/43
+  log "- Setting container sysctl net.ipv4.tcp_fwmark_accept=1"
+  nsenter -n -t $NID sysctl -q net.ipv4.tcp_fwmark_accept=1
+
   local INDEX=1 NODE_IP
   for NODE_IP in ${INGRESS_NODE_GATEWAY_IPS[@]}
   do
@@ -116,6 +124,10 @@ route_ingress() {
 
       # 2. Map the TOS value on any incoming packets to a connection mark, using the same value.
       nsenter -n -t $NID iptables "${IPTABLES_OPTS[@]}" -t mangle -A PREROUTING -m tos --tos $NODE_ID/0xff -j CONNMARK --set-xmark $NODE_ID/0xffffffff
+
+      # 2.1 Map the TOS value on incoming TCP SYN packets to a firewall mark, using the same value,
+      #     for inheritance by the accepted socket (see 3.2 above).
+      nsenter -n -t $NID iptables "${IPTABLES_OPTS[@]}" -t mangle -A PREROUTING -p tcp --syn -m tos --tos $NODE_ID/0xff -j MARK --set-xmark $NODE_ID/0xffffffff
 
       # 4. Select the correct routing table to use, according to the firewall mark on the outgoing packet.
       nsenter -n -t $NID ip rule add from $INGRESS_SUBNET fwmark $NODE_ID lookup $NODE_ID prio 32700
