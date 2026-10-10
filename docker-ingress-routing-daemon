@@ -110,6 +110,20 @@ route_ingress() {
   log "- Setting container sysctl net.ipv4.tcp_fwmark_accept=1"
   nsenter -n -t $NID sysctl -q net.ipv4.tcp_fwmark_accept=1
 
+  # 3.3 Cap the MTU of the policy routes (see 5. below) at the MTU of the container's default route interface
+  #     (typically docker_gwbridge, standing in for the path to the outside world), where the ingress network
+  #     interface MTU exceeds it. Otherwise, an ingress network MTU above that of the outside world would cause
+  #     an MSS to be advertised that clients able to send larger frames could not use without PMTU discovery.
+  #     - See https://github.com/newsnowlabs/docker-ingress-routing-daemon/issues/43
+  local ROUTE_MTU_OPTS=()
+  local CIF_MTU=$(nsenter -n -t $NID ip -o link show dev $CIF | sed -nr 's/.* mtu ([0-9]+) .*/\1/p')
+  local DEF_IF=$(nsenter -n -t $NID ip -o route show default | sed -nr 's/.* dev ([^ ]+).*/\1/p' | head -n 1)
+  local DEF_MTU=$([ -n "$DEF_IF" ] && nsenter -n -t $NID ip -o link show dev $DEF_IF | sed -nr 's/.* mtu ([0-9]+) .*/\1/p')
+  if [ -n "$CIF_MTU" ] && [ -n "$DEF_MTU" ] && [ "$DEF_MTU" -lt "$CIF_MTU" ]; then
+    log "- Capping container policy route MTU at $DEF_MTU ($DEF_IF), below ingress network interface MTU $CIF_MTU ($CIF)"
+    ROUTE_MTU_OPTS=(mtu $DEF_MTU)
+  fi
+
   local INDEX=1 NODE_IP
   for NODE_IP in ${INGRESS_NODE_GATEWAY_IPS[@]}
   do
@@ -134,7 +148,7 @@ route_ingress() {
 
       # 5. Route outgoing traffic to the correct node's ingress network IP, according to its firewall mark
       #    (which in turn came from its connection mark, its TOS value, and ultimately its IP).
-      nsenter -n -t $NID ip route add table $NODE_ID default via $NODE_IP
+      nsenter -n -t $NID ip route add table $NODE_ID default via $NODE_IP "${ROUTE_MTU_OPTS[@]}"
     fi
     ((INDEX+=1))
   done
