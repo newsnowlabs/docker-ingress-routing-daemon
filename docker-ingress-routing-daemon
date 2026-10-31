@@ -1,10 +1,10 @@
 #!/bin/bash
 
-VERSION=4.3.0
+VERSION=4.3.1
 IPTABLES_OPTS=()
 
-# Ingress Routing Daemon v4.3.0
-# Copyright © 2020-2025 Struan Bartlett
+# Ingress Routing Daemon v4.3.1
+# Copyright © 2020-2026 Struan Bartlett
 # ----------------------------------------------------------------------
 # Permission is hereby granted, free of charge, to any person 
 # obtaining a copy of this software and associated documentation files 
@@ -61,6 +61,7 @@ detect_ingress() {
 route_ingress() {
   local ID="$1"
   local SERVICE="$2"
+  local SOURCE="$3" # 'preexisting' (startup scan) or 'event' (container start event)
 
   if [ -z "$SERVICE" ]; then
     return
@@ -81,8 +82,16 @@ route_ingress() {
 
   local IPTABLE_COMMENT="docker-ingress-routing-daemon"
   if nsenter -n -t $NID iptables "${IPTABLES_OPTS[@]}" -t mangle -C OUTPUT -m comment --comment "$IPTABLE_COMMENT" 2>/dev/null; then
-    log "Detected container for service '$SERVICE', with ID '$ID' and NID '$NID': mangle table already configured, so skipping."
-    return
+    if [ "$SOURCE" = "preexisting" ]; then
+      # Expected when DIRD is restarted with --preexisting: a previous instance already configured this container.
+      log "Detected container for service '$SERVICE', with ID '$ID' and NID '$NID': mangle table already configured, so skipping."
+      return
+    fi
+
+    # Unexpected: a newly started container should have a pristine network namespace, but this
+    # assumption has been occasionally observed to be false in a real-world production deployment.
+    # Warn, then apply the rules regardless, so the container is not left without return-path routing.
+    log "WARNING: Detected container launch for service '$SERVICE', with ID '$ID' and NID '$NID': mangle table unexpectedly already configured, but applying policy routing/firewall rules regardless."
   fi
     
   log "Detected container launch for service '$SERVICE', with ID '$ID' and NID '$NID': ingress network interface $CIF found, so applying policy routing/firewall rules:"
@@ -392,7 +401,7 @@ if [ "$PREEXISTING" = "1" ]; then
     --filter "label=com.docker.swarm.service.name" | \
     while read ID SERVICE
     do
-      route_ingress "$ID" "$SERVICE"
+      route_ingress "$ID" "$SERVICE" "preexisting"
     done
 fi
   
@@ -407,5 +416,5 @@ docker events \
   --filter 'type=container' | \
   while read ID SERVICE
   do
-    route_ingress "$ID" "$SERVICE"
+    route_ingress "$ID" "$SERVICE" "event"
   done
